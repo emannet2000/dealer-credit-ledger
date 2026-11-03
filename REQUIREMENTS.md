@@ -2,7 +2,7 @@
 
 This document defines the target functional requirements for the Dealer Credit Ledger. It covers the existing product plus the modules needed for a complete credit, inventory and collections system.
 
-- **Document version:** 1.4
+- **Document version:** 1.5
 - **Application version:** 1.0 (Node.js 20+, SQLite, vanilla JS)
 - **Last updated:** 3 November 2026
 - **Requirement count:** 87 functional, plus 12 production-readiness items
@@ -29,14 +29,14 @@ This document defines the target functional requirements for the Dealer Credit L
 | Pricing and catalog | FR-035 – FR-040 | 6 | 4 | 0 | 2 |
 | Returns and adjustments | FR-041 – FR-045 | 5 | 2 | 1 | 2 |
 | Reporting and analytics | FR-046 – FR-053 | 8 | 8 | 0 | 0 |
-| Security, users and audit | FR-054 – FR-061 | 8 | 7 | 0 | 1 |
-| Backup and operations | FR-062 – FR-067 | 6 | 5 | 1 | 0 |
+| Security, users and audit | FR-054 – FR-061 | 8 | 8 | 0 | 0 |
+| Backup and operations | FR-062 – FR-067 | 6 | 6 | 0 | 0 |
 | Platform and integrations | FR-068 – FR-070 | 3 | 0 | 1 | 2 |
 | Collections and controls | FR-071 – FR-074 | 4 | 0 | 0 | 4 |
 | Dealer relationships (CRM) | FR-075 | 1 | 1 | 0 | 0 |
-| Field collections, privacy and growth | FR-076 – FR-082 | 7 | 0 | 0 | 7 |
+| Field collections, privacy and growth | FR-076 – FR-082 | 7 | 1 | 0 | 6 |
 | Catalog media, approvals and field use | FR-083 – FR-087 | 5 | 4 | 0 | 1 |
-| **Total** | | **87** | **56** | **3** | **28** |
+| **Total** | | **87** | **59** | **2** | **26** |
 
 ### P0 items delivered in this release
 
@@ -742,7 +742,7 @@ This document defines the target functional requirements for the Dealer Credit L
 ### FR-059 — Two-factor authentication
 
 - **Priority:** P1
-- **Status:** Planned
+- **Status:** Implemented
 - **User story:** As the owner, I want a second factor for admin accounts so a stolen password is not enough.
 - **Acceptance criteria:**
   - Admins can enrol a TOTP authenticator.
@@ -840,14 +840,13 @@ This document defines the target functional requirements for the Dealer Credit L
 ### FR-067 — Backup verification and monitoring
 
 - **Priority:** P1
-- **Status:** Partial
+- **Status:** Implemented
 - **User story:** As the owner, I want to know whether backups are actually usable so I am not surprised during a recovery.
 - **Acceptance criteria:**
   - The app records the last successful backup time and size.
   - The dashboard warns when the last backup is older than seven days.
   - A verification job can open the backup and run `PRAGMA integrity_check`.
   - An alert is raised when a backup or offsite sync fails.
-  - **Gap:** the download reminder and error logging exist; integrity verification and an alert channel are not yet built.
 
 ---
 
@@ -993,7 +992,7 @@ This document defines the target functional requirements for the Dealer Credit L
 ### FR-078 — Personal data and consent (Philippine Data Privacy Act of 2012)
 
 - **Priority:** P1
-- **Status:** Planned
+- **Status:** Implemented
 - **User story:** As the owner, I want to handle dealers' personal information as the Data Privacy Act (RA 10173) requires so the business stays compliant and dealers can trust it.
 - **Acceptance criteria:**
   - Each dealer and prospect record stores consent: date, how it was given (signed form, portal, verbal), the privacy notice version, and who recorded it.
@@ -1070,7 +1069,7 @@ This document defines the target functional requirements for the Dealer Credit L
   - The catalog update accepts an Image column and downloads pictures for products with no photo or a changed link, reporting any that fail.
   - Only http(s) links on standard ports to public addresses are fetched, including after redirects; downloads are limited to 8 MB and 12 seconds and must be a real JPG, PNG, WebP or GIF.
   - Viewer and dealer accounts cannot fetch pictures; each download is in the activity log with its source link.
-  - **Known gap:** a picture downloaded in a form that is then cancelled is not deleted.
+  - Pictures never saved on a record are deleted after 24 hours (PR-11).
 
 ### FR-084 — Approval requests for credit-hold and over-limit sales
 
@@ -1134,17 +1133,17 @@ These items must be resolved before, or soon after, the application is used with
 
 | ID | Item | Priority | Status |
 |---|---|---|---|
-| PR-01 | Commit, review and tag the current work | Blocker | Open |
-| PR-02 | Fix vulnerable dependencies | Blocker | Open |
-| PR-03 | Record a sale and its stock change atomically | Blocker | Open |
-| PR-04 | Server-side pricing of credit sales | Blocker | Open |
-| PR-05 | HTTPS, secure cookies and security headers | Blocker | Open |
-| PR-06 | Data Privacy Act compliance before collecting personal data | Blocker | Open |
-| PR-07 | Automated tests for browser business logic, and CI | Soon | Open |
-| PR-08 | Verified backups and a tested restore | Soon | Open |
-| PR-09 | Performance as data grows | Soon | Open |
-| PR-10 | Protection of data on lost phones | Soon | Open |
-| PR-11 | Clean up orphaned picture downloads | Soon | Open |
+| PR-01 | Commit, review and tag the current work | Blocker | Partly done: committed on branch production-readiness and tagged; human review pending |
+| PR-02 | Fix vulnerable dependencies | Blocker | Done |
+| PR-03 | Record a sale and its stock change atomically | Blocker | Done |
+| PR-04 | Server-side pricing of credit sales | Blocker | Done |
+| PR-05 | HTTPS, secure cookies and security headers | Blocker | Done (code); HTTPS proxy is set up at deployment |
+| PR-06 | Data Privacy Act compliance before collecting personal data | Blocker | Done (app tools); notice review, DPO and NPC check are for the business |
+| PR-07 | Automated tests for browser business logic, and CI | Soon | Done |
+| PR-08 | Verified backups and a tested restore | Soon | Done |
+| PR-09 | Performance as data grows | Soon | Done |
+| PR-10 | Protection of data on lost phones | Soon | Done |
+| PR-11 | Clean up orphaned picture downloads | Soon | Done |
 | PR-12 | Pilot rollout plan | Blocker | Open |
 
 ### PR-01 — Commit, review and tag the current work
@@ -1257,6 +1256,19 @@ These items must be resolved before, or soon after, the application is used with
   - Issues found in the pilot are fixed before wider rollout.
 
 ---
+
+### Production readiness results (3 November 2026)
+
+- **PR-02:** `npm audit --omit=dev` reports 0 vulnerabilities (express 4.22.3).
+- **PR-03, PR-04:** sales and returns are priced and change stock in one server transaction; manual prices need an owner, an editor or a reason.
+- **PR-05:** HTTPS redirect, HSTS and a hash-based Content-Security-Policy when `COOKIE_SECURE=true`; production refuses to start without it. README, "Going live".
+- **PR-06:** FR-078 implemented; `docs/PRIVACY.md` covers the business's remaining steps and breach response.
+- **PR-07:** 40 Node tests (API and browser logic) and 4 headless-Chrome tests; GitHub Actions runs them with the audit. Branch protection must be turned on in GitHub.
+- **PR-08:** backups are verified and alert on failure; a 50,000-transaction ledger backed up and verified in 0.2 s and restored in 0.3 s.
+- **PR-09:** with 1,000 dealers and 50,000 transactions, screens switch in 0.06–0.32 s and writes take about 20 ms (README, "Performance"). Opening on a new device takes about 1.8 s.
+- **PR-10:** two-step sign-in (FR-059), remote sign-out with offline-data wipe, 7-day staff sessions.
+- **PR-11:** unused pictures are removed after 24 hours.
+- **Still open:** a human review of the branch (PR-01) and the pilot (PR-12). A full backup restore resets two-step sign-in for restored accounts, because the backup doesn't include authenticator secrets.
 
 ## Cross-cutting non-functional requirements
 
