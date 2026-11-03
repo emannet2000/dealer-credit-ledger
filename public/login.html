@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Sign in · Dealer Credit Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700&family=Public+Sans:wght@400;600;700&display=swap">
+<style>
+:root{--bg:#f5f7f6;--surface:#fff;--line:#d5dedb;--fg:#15211e;--muted:#5b6b67;--accent:#0d6b5c;--accent-fg:#fff;--bad:#b3261e;--bad-soft:#f9dedc;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1514;--surface:#172120;--line:#2a3836;--fg:#e3ece9;--muted:#93a5a0;--accent:#4cc3a9;--accent-fg:#06201b;--bad:#f2847b;--bad-soft:#3d1d1a;color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 "Public Sans",system-ui,sans-serif;display:grid;place-items:center;padding:24px max(16px,env(safe-area-inset-left,0px))}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:28px;width:100%;max-width:400px}
+h1{font:700 24px "Bricolage Grotesque",system-ui,sans-serif;margin:0 0 4px}
+p{margin:0 0 18px;color:var(--muted)}
+form{display:flex;flex-direction:column;gap:14px}
+label{display:flex;flex-direction:column;gap:4px;font-size:13px;font-weight:600;color:var(--muted)}
+input{font:inherit;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+input:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button{font:600 15px "Public Sans",system-ui,sans-serif;background:var(--accent);color:var(--accent-fg);border:0;border-radius:8px;padding:11px;cursor:pointer}
+button[disabled]{opacity:.6}
+.err{background:var(--bad-soft);color:var(--bad);border-radius:8px;padding:10px 12px;font-size:14px}
+</style>
+</head>
+<body>
+<main class="card">
+  <h1 id="h">Sign in</h1>
+  <p id="sub">Dealer Credit Ledger</p>
+  <form id="f" novalidate>
+    <div class="err" id="err" hidden></div>
+    <label id="nameRow" hidden>Your name<input id="name" autocomplete="name"></label>
+    <label>Username<input id="username" autocomplete="username" autocapitalize="none" required></label>
+    <label>Password<input id="password" type="password" autocomplete="current-password" required></label>
+    <button id="go" type="submit">Sign in</button>
+  </form>
+</main>
+<script>
+(async () => {
+  const $ = (s) => document.querySelector(s);
+  let setup = false;
+  try { setup = (await (await fetch("/api/setup")).json()).needsSetup; } catch (e) {}
+  if (setup) {
+    $("#h").textContent = "Create the owner account";
+    $("#sub").textContent = "This is the first time the ledger is opened. The owner can add staff accounts later.";
+    $("#nameRow").hidden = false; $("#go").textContent = "Create account";
+    $("#password").autocomplete = "new-password"; $("#password").placeholder = "At least 8 characters";
+    $("#name").focus();
+  } else $("#username").focus();
+  $("#f").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = $("#go"); btn.disabled = true; $("#err").hidden = true;
+    const body = { username: $("#username").value.trim(), password: $("#password").value };
+    if (setup) body.name = $("#name").value.trim();
+    try {
+      const r = await fetch(setup ? "/api/setup" : "/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.message || "Couldn't sign in. Try again.");
+      location.href = "/";
+    } catch (err) { $("#err").textContent = err.message; $("#err").hidden = false; btn.disabled = false; }
+  });
+})();
+</script>
+</body>
+</html>

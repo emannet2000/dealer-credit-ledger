@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0d6b5c">
+<title>My Account · Dealer Portal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Public+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: one narrow column for phones; balance card first, then tabs for unpaid, history, catalog, account. */
+:root{
+  --bg:#f5f7f6; --surface:#fff; --sunk:#eaefed; --line:#d5dedb; --fg:#15211e; --muted:#5b6b67;
+  --accent:#0d6b5c; --accent-fg:#fff; --accent-soft:#d8ece7;
+  --warn:#a35a00; --warn-soft:#fbecd6; --bad:#b3261e; --bad-soft:#f9dedc; --good:#1f7a3a; --good-soft:#dcf1e1;
+  --f-display:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif;
+  --f-body:"Public Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; --r:12px; color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0f1514; --surface:#172120; --sunk:#111a19; --line:#2a3836; --fg:#e3ece9; --muted:#93a5a0;
+  --accent:#4cc3a9; --accent-fg:#06201b; --accent-soft:#16352f;
+  --warn:#f0a648; --warn-soft:#3a2a12; --bad:#f2847b; --bad-soft:#3d1d1a; --good:#6fd18c; --good-soft:#163222; color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 var(--f-body);padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+[hidden]{display:none!important}
+img{max-width:100%}
+.wrap{max-width:640px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1,h2,h3{font-family:var(--f-display);margin:0;line-height:1.2;text-wrap:balance}
+.num{font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)} .small{font-size:13px}
+header{padding-block:18px 8px;display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+header h1{font-size:22px}
+.btn{font:600 14px var(--f-body);border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--fg);padding:8px 14px;cursor:pointer}
+.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.btn.sm{padding:5px 10px;font-size:13px}
+.btn:focus-visible,.tab:focus-visible,input:focus-visible,.row:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px;margin-bottom:14px}
+.bal .lbl{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+.bal .big{font-family:var(--f-display);font-size:38px;font-weight:700;margin:2px 0 10px}
+.bal-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 16px;border-top:1px solid var(--line);padding-top:12px}
+.bal-grid b{display:block;font-size:17px}
+.bad-t{color:var(--bad)}
+.notice{border-radius:var(--r);padding:12px 14px;margin-bottom:14px;font-size:14px}
+.notice.bad{background:var(--bad-soft)} .notice.warn{background:var(--warn-soft)} .notice.info{background:var(--accent-soft)}
+.pay{display:flex;gap:10px;align-items:flex-start;justify-content:space-between}
+.pay p{margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:6px 0 12px;overflow-x:auto}
+.tab{border:0;background:none;color:var(--muted);font:600 14px var(--f-body);padding:10px 12px;border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap}
+.tab[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--accent)}
+.list{display:flex;flex-direction:column;gap:8px}
+.row{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;justify-content:space-between;gap:12px;cursor:pointer;width:100%;text-align:left;font:inherit;color:inherit}
+.row:hover{background:var(--sunk)}
+.row .r{text-align:right;white-space:nowrap}
+.pill{display:inline-block;font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.pill.good{background:var(--good-soft);color:var(--good)} .pill.warn{background:var(--warn-soft);color:var(--warn)} .pill.bad{background:var(--bad-soft);color:var(--bad)} .pill.neutral{background:var(--sunk);color:var(--muted)}
+.void{opacity:.55} .void .amt{text-decoration:line-through}
+.cat{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.prod{background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+.prod .ph{aspect-ratio:1;background:var(--sunk);display:grid;place-items:center;color:var(--muted);font-size:12px;max-width:100%}
+.prod img{width:100%;aspect-ratio:1;object-fit:cover;display:block}
+.prod div.t{padding:8px 10px;display:flex;flex-direction:column;gap:2px;font-size:13px;min-width:0}
+.prod b{font-size:14px;overflow-wrap:anywhere}
+input{font:inherit;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:9px 11px;width:100%}
+label{display:flex;flex-direction:column;gap:4px;font-size:13px;font-weight:600;color:var(--muted)}
+form{display:flex;flex-direction:column;gap:12px}
+.empty{text-align:center;color:var(--muted);padding:24px 8px}
+dl.kv{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:6px 16px;margin:0;font-size:14px}
+dl.kv dt{color:var(--muted)} dl.kv dd{margin:0}
+.overlay{position:fixed;inset:0;background:rgba(5,15,13,.5);z-index:20;display:flex;align-items:flex-end;justify-content:center}
+.modal{background:var(--bg);width:min(640px,100%);max-height:92vh;overflow-y:auto;border-radius:16px 16px 0 0;padding:18px max(16px,env(safe-area-inset-right,0px)) calc(24px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.receipt{background:#fff;color:#111;border-radius:10px;padding:18px;font-size:14px;border:1px solid var(--line)}
+.receipt table{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}
+.receipt th{text-align:left;color:#555;font-size:11px;text-transform:uppercase;border-bottom:1px solid #999;padding:4px}
+.receipt td{border-bottom:1px solid #ddd;padding:5px 4px}
+.receipt .r{text-align:right}
+.rc-total{display:flex;justify-content:space-between;border-top:2px solid #111;padding-top:8px;font-weight:700}
+.rc-total b{font-family:var(--f-display);font-size:20px}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:8px;z-index:40;font-weight:600;font-size:14px}
+footer{padding-block:24px 96px;text-align:center}
+.btn{transition:background-color .15s,border-color .15s,transform .08s}
+.btn:active:not([disabled]){transform:scale(.97)}
+.btn.primary{box-shadow:0 2px 8px color-mix(in srgb,var(--accent) 28%,transparent)}
+.tab{position:relative;border-bottom-color:transparent!important;transition:color .15s}
+.tab::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:3px;border-radius:3px 3px 0 0;background:var(--accent);transform:scaleX(0);transition:transform .22s cubic-bezier(.2,.8,.2,1)}
+.tab[aria-selected="true"]::after{transform:scaleX(1)}
+.row{transition:background-color .12s,transform .08s}.row:active{transform:scale(.99)}
+input{transition:border-color .15s,box-shadow .15s}
+input:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent);outline:none}
+.prod{transition:border-color .15s,box-shadow .15s}.prod:has(.qty){border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 20%,transparent)}
+.toast{display:flex;align-items:center;gap:8px;border-radius:12px!important;box-shadow:0 8px 24px rgba(0,0,0,.18);max-width:calc(100% - 32px)}
+.toast svg{width:18px;height:18px;flex:none;color:var(--good)}
+.skel{display:block;height:12px;border-radius:6px;margin:10px 0;background:linear-gradient(90deg,var(--sunk) 0%,color-mix(in srgb,var(--sunk) 40%,var(--surface)) 50%,var(--sunk) 100%);background-size:200% 100%}
+.skel.tall{height:34px;width:60%}.skel.w40{width:40%}.skel.w80{width:80%}
+.cartbar{transition:transform .25s cubic-bezier(.2,.8,.2,1)}
+@media (prefers-reduced-motion:no-preference){
+  .overlay{animation:ovIn .2s ease-out}.modal{animation:upIn .28s cubic-bezier(.2,.8,.2,1)}
+  .toast{animation:tIn .26s cubic-bezier(.2,.8,.2,1)}
+  .skel{animation:shimmer 1.3s linear infinite}
+  #main.tab-in .tabs~*{animation:fadeUp .22s ease-out}
+  .cartbar:not([hidden]){animation:upIn .28s cubic-bezier(.2,.8,.2,1)}
+  @keyframes ovIn{from{background:rgba(5,15,13,0)}}
+  @keyframes upIn{from{transform:translateY(40px);opacity:.4}}
+  @keyframes tIn{from{opacity:0;transform:translate(-50%,12px) scale(.96)}to{transform:translate(-50%,0)}}
+  @keyframes shimmer{to{background-position:-200% 0}}
+  @keyframes fadeUp{from{opacity:.5;transform:translateY(4px)}}
+}
+.qty{display:flex;align-items:center;gap:4px;margin-top:6px}
+.qty input{width:48px;text-align:center;padding:5px 2px}
+.qty .btn{padding:4px 10px;min-width:32px}
+.add{margin-top:6px;width:100%}
+.cartbar{position:fixed;left:0;right:0;bottom:0;z-index:15;background:var(--surface);border-top:1px solid var(--line);padding:10px max(16px,env(safe-area-inset-right,0px)) calc(10px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));box-shadow:0 -6px 20px rgba(0,0,0,.08)}
+.cartbar .in{max-width:640px;margin:0 auto;display:flex;justify-content:space-between;align-items:center;gap:12px}
+.otbl{width:100%;border-collapse:collapse;font-size:14px}
+.otbl th{text-align:left;font-size:11px;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line);padding:6px 4px}
+.otbl td{border-bottom:1px solid var(--line);padding:8px 4px;vertical-align:middle}
+.otbl .r{text-align:right}
+.tot{display:flex;justify-content:space-between;padding:4px 0}
+.tot.g{font-weight:700;font-size:17px;border-top:1px solid var(--line);margin-top:4px;padding-top:8px}
+.steps{display:flex;gap:4px;margin:10px 0}
+.steps span{flex:1;height:6px;border-radius:3px;background:var(--sunk)}
+.steps span.on{background:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><div><div class="small muted" id="store">Dealer portal</div><h1 id="hello">My account</h1></div><button class="btn sm" id="logout" type="button">Sign out</button></header>
+  <main id="main" aria-busy="true"><div class="card" aria-label="Loading your account"><i class="skel w40"></i><i class="skel tall"></i><i class="skel w80"></i><i class="skel w80"></i></div><div class="card"><i class="skel w40"></i><i class="skel w80"></i></div></main>
+  <footer class="small muted" id="sync"></footer>
+</div>
+<div class="cartbar" id="cartbar" hidden><div class="in"><div><b id="cb-n"></b><div class="small muted num" id="cb-t"></div></div><button class="btn primary" type="button" id="cb-go">Review order</button></div></div>
+<div id="modalRoot"></div>
+<script>
+(() => {
+"use strict";
+const $=(s,el=document)=>el.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const peso=new Intl.NumberFormat("en-PH",{style:"currency",currency:"PHP"}); const P=n=>peso.format(Number(n)||0);
+const r2=n=>Math.round((Number(n)||0)*100)/100;
+const pad=n=>String(n).padStart(2,"0"); const ymd=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; const today=()=>ymd(new Date());
+const daysBetween=(a,b)=>Math.round((new Date(b+"T00:00:00")-new Date(a+"T00:00:00"))/864e5);
+const fmtDate=s=>s?new Date(s+"T00:00:00").toLocaleDateString("en-PH",{month:"short",day:"numeric",year:"numeric"}):"—";
+const LABEL={sale:"Delivery",payment:"Payment",return:"Return"};
+function toast(m){ document.querySelectorAll(".toast").forEach(x=>x.remove()); const t=document.createElement("div"); t.className="toast"; t.setAttribute("role","status"); t.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg><span></span>'; t.lastChild.textContent=m; document.body.appendChild(t); setTimeout(()=>t.remove(),2800); }
+async function api(method,url,body){ const r=await fetch(url,{method,credentials:"same-origin",headers:body?{"Content-Type":"application/json"}:{},body:body?JSON.stringify(body):undefined});
+  if(r.status===401){ location.href="/login"; throw new Error("Signed out"); } const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(d.message||"Something went wrong. Try again."); return d; }
+
+const S={me:null,dealer:null,txns:[],products:[],orders:[],settings:{},tab:"unpaid",q:"",cart:new Map()};
+try{ const c=JSON.parse(localStorage.getItem("portal-cart")||"[]"); S.cart=new Map(c); }catch(e){}
+const saveCart=()=>{ try{ localStorage.setItem("portal-cart",JSON.stringify([...S.cart])); }catch(e){} };
+const myPct=()=>{ const d=S.dealer||{}, s=S.settings; return d.discountPct!=null&&d.discountPct!==""?Number(d.discountPct):Number(s.discountPct??25); };
+const promoOn=p=>!!(p&&p.promo&&Number(p.promo.price)>0&&(!p.promo.from||today()>=p.promo.from)&&(!p.promo.to||today()<=p.promo.to));
+const unitPrice=p=>promoOn(p)?Number(p.promo.price):(Number(p.srp)||0);
+const prodPct=p=>promoOn(p)&&p.promo.noDiscount?0:(p.discountPct!=null&&p.discountPct!==""?Number(p.discountPct):myPct());
+const discLabel=o=>o.discountPct!=null?`Less ${o.discountPct}% dealer discount`:"Less dealer discount";
+function cartTotals(){ let sub=0, disc=0, n=0; const pcts=new Set(); S.cart.forEach((q,pid)=>{ const p=S.products.find(x=>x._id===pid); if(p){ sub+=q*unitPrice(p); disc+=q*unitPrice(p)*prodPct(p)/100; n+=q; pcts.add(prodPct(p)); } }); sub=r2(sub); disc=r2(disc); return {sub,disc,total:r2(sub-disc),n,lines:S.cart.size,pct:pcts.size===1?[...pcts][0]:null}; }
+const ORD_L={new:"Received",preparing:"Preparing",ready:"Ready for pickup",released:"Released to you",cancelled:"Cancelled"};
+const ORD_C={new:"neutral",preparing:"warn",ready:"good",released:"neutral",cancelled:"bad"};
+const STEP={new:1,preparing:2,ready:3,released:4};
+const live=()=>S.txns.filter(t=>!t.voided).sort((a,b)=>(a.date||"").localeCompare(b.date||"")||(a.createdAt||0)-(b.createdAt||0));
+function compute(){
+  const tx=live(), t0=today(); const queue=[], settled=[]; let pool=0, run=0; const runAt=new Map();
+  tx.forEach(t=>{ run=r2(run+(t.type==="sale"?t.amount:-t.amount)); runAt.set(t,run);
+    if(t.type==="sale"){ let rem=t.amount; if(pool>0.004){ const ap=Math.min(pool,rem); pool=r2(pool-ap); rem=r2(rem-ap); } if(rem<=0.004) settled.push({t,paid:t.date}); else queue.push({t,rem}); }
+    else { let c=t.amount; while(c>0.004&&queue.length){ const q=queue[0]; const ap=Math.min(c,q.rem); q.rem=r2(q.rem-ap); c=r2(c-ap); if(q.rem<=0.004){ queue.shift(); settled.push({t:q.t,paid:t.date}); } } pool=r2(pool+c); } });
+  const open=queue.map(q=>({...q,late:q.t.dueDate&&q.t.dueDate<t0?daysBetween(q.t.dueDate,t0):0}));
+  const onTime=settled.filter(s=>!s.t.dueDate||s.paid<=s.t.dueDate).length;
+  return {balance:run,open,overdue:r2(open.filter(o=>o.late).reduce((a,o)=>a+o.rem,0)),maxLate:open.reduce((m,o)=>Math.max(m,o.late),0),
+    nextDue:open.filter(o=>!o.late).sort((a,b)=>a.t.dueDate.localeCompare(b.t.dueDate))[0]||null,settled:settled.length,onTime,runAt,
+    lastPay:tx.filter(t=>t.type==="payment").pop()||null};
+}
+function render(){
+  const d=S.dealer, s=S.settings; if(!d){ $("#main").innerHTML=`<div class="card"><div class="empty">Your dealer account isn't linked yet. Ask ${esc(s.storeName||"the store")} to check your portal access.</div></div>`; return; }
+  $("#store").textContent=s.storeName||"Dealer portal"; $("#hello").textContent=`Hi, ${d.name.split(" ")[0]}!`;
+  const c=compute(), hold=c.maxLate>(Number(s.holdDays)||60);
+  const avail=d.creditLimit?Math.max(0,d.creditLimit-c.balance):null;
+  let html=`<section class="card bal"><div class="lbl">${c.balance<0?"Credit in your favor":"Your balance"}</div><div class="big num">${P(Math.abs(c.balance))}</div>
+    <div class="bal-grid">
+      <div><span class="small muted">Overdue</span><b class="num ${c.overdue?"bad-t":""}">${P(c.overdue)}</b></div>
+      <div><span class="small muted">Next due</span><b class="num">${c.nextDue?fmtDate(c.nextDue.t.dueDate):"—"}</b>${c.nextDue?`<span class="small muted num">${P(c.nextDue.rem)}</span>`:""}</div>
+      ${d.creditLimit?`<div><span class="small muted">Credit limit</span><b class="num">${P(d.creditLimit)}</b></div><div><span class="small muted">Available</span><b class="num">${P(avail)}</b></div>`:""}
+      <div><span class="small muted">Last payment</span><b class="num">${c.lastPay?P(c.lastPay.amount):"—"}</b>${c.lastPay?`<span class="small muted">${fmtDate(c.lastPay.date)}</span>`:""}</div>
+      <div><span class="small muted">Paid on time</span><b class="num">${c.settled?Math.round(c.onTime/c.settled*100)+"%":"—"}</b>${c.settled?`<span class="small muted">${c.onTime} of ${c.settled} deliveries</span>`:""}</div>
+    </div></section>`;
+  if(hold) html+=`<div class="notice bad"><b>Your account is on hold.</b> Your oldest unpaid delivery is ${c.maxLate} days late. Please pay the overdue amount so the store can release new products to you.</div>`;
+  else if(c.overdue) html+=`<div class="notice warn"><b>${P(c.overdue)} is past due.</b> Please pay soon to keep your account in good standing.</div>`;
+  if(s.paymentInfo) html+=`<section class="card"><div class="pay"><div><h3 style="font-size:16px">How to pay</h3><p>${esc(s.paymentInfo)}</p></div><button class="btn sm" id="copyPay" type="button">Copy</button></div>${s.phone?`<p class="small muted" style="margin:8px 0 0">Questions? Contact ${esc(s.storeName||"the store")}: ${esc(s.phone)}</p>`:""}</section>`;
+  const openOrders=S.orders.filter(o=>["new","preparing","ready"].includes(o.status)).length;
+  const tabs=[["unpaid",`Unpaid (${c.open.length})`],["catalog","Order"],["orders",`My orders${openOrders?` (${openOrders})`:""}`],["history","History"],["account","Account"]];
+  html+=`<div class="tabs" role="tablist">${tabs.map(([k,l])=>`<button class="tab" role="tab" type="button" data-tab="${k}" aria-selected="${S.tab===k}">${l}</button>`).join("")}</div>`;
+  if(S.tab==="unpaid") html+=c.open.length?`<div class="list">${c.open.slice().reverse().map(o=>`<button class="row" type="button" data-rc="${esc(o.t._id)}"><div><b>${esc(o.t.no||LABEL.sale)}</b><div class="small muted">Released ${fmtDate(o.t.date)} · due ${fmtDate(o.t.dueDate)}</div>${o.rem<o.t.amount-0.004?`<div class="small" style="color:var(--good)">${P(o.t.amount-o.rem)} of ${P(o.t.amount)} paid</div>`:""}</div><div class="r"><b class="num">${P(o.rem)}</b><div>${o.late?`<span class="pill bad">${o.late} days late</span>`:`<span class="pill neutral">Not yet due</span>`}</div></div></button>`).join("")}</div>`:`<div class="empty">You have no unpaid deliveries. Salamat po!</div>`;
+  if(S.tab==="history"){ const all=S.txns.slice().sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.createdAt||0)-(a.createdAt||0));
+    html+=all.length?`<div class="list">${all.map(t=>`<button class="row ${t.voided?"void":""}" type="button" data-rc="${esc(t._id)}"><div><b>${esc(t.opening?"Opening balance":t.payKind==="partial"?"Partial payment":t.payKind==="full"?"Full payment":LABEL[t.type])} ${esc(t.no||"")}</b><div class="small muted">${fmtDate(t.date)}${t.type==="payment"?" · "+esc(t.method||""):""}${t.voided?" · cancelled":""}</div></div><div class="r"><b class="num amt">${t.type==="sale"?"":"−"}${P(t.amount)}</b>${t.voided?"":`<div class="small muted num">Balance ${P(c.runAt.get(t))}</div>`}</div></button>`).join("")}</div>`:`<div class="empty">No transactions yet.</div>`; }
+  if(S.tab==="catalog"){ const pct=d.discountPct!=null&&d.discountPct!==""?Number(d.discountPct):Number(s.discountPct??25); const q=S.q.toLowerCase();
+    const list=S.products.filter(p=>!q||[p.name,p.code,p.category].join(" ").toLowerCase().includes(q)).sort((a,b)=>a.name.localeCompare(b.name));
+    html+=`<label style="margin-bottom:12px">Search products<input id="q" type="search" value="${esc(S.q)}" placeholder="Name, code or category"></label>
+      ${s.catalogName?`<p class="small" style="margin:0 0 6px"><b>${esc(s.catalogName)}</b></p>`:""}<p class="small muted" style="margin:0 0 10px">Add what you need and send your order. ${esc(s.storeName||"The store")} prepares it before you arrive. Prices are SRP less your ${pct}% dealer discount.</p>
+      ${hold?`<div class="notice bad">Your account is on hold. You can still send an order, but it may only be released after you pay the overdue amount.</div>`:""}
+      ${list.length?`<div class="cat">${list.map(p=>`<div class="prod">${p.imageId?`<img src="/_blob/${encodeURIComponent(p.imageId)}" alt="" loading="lazy">`:`<div class="ph">No photo</div>`}<div class="t"><b>${esc(p.name)}</b>${promoOn(p)?`<span class="pill warn" style="align-self:flex-start">PROMO</span><span class="muted num"><s>SRP ${P(p.srp)}</s> ${P(p.promo.price)}</span>`:p.srp?`<span class="muted num">SRP ${P(p.srp)}</span>`:""}${p.srp||promoOn(p)?`<span class="num">Your price <b>${P(unitPrice(p)*(1-prodPct(p)/100))}</b></span>`:""}${p.available?`<span class="pill good" style="align-self:flex-start">Available</span>`:`<span class="pill neutral" style="align-self:flex-start">Out of stock</span>`}
+        ${p.srp?(S.cart.get(p._id)?`<div class="qty"><button class="btn" type="button" data-q="-1" data-p="${esc(p._id)}" aria-label="One less ${esc(p.name)}">−</button><input class="num" type="number" min="0" inputmode="numeric" id="q-${esc(p._id)}" data-setq="${esc(p._id)}" value="${S.cart.get(p._id)}" aria-label="Quantity of ${esc(p.name)}"><button class="btn" type="button" data-q="1" data-p="${esc(p._id)}" aria-label="One more ${esc(p.name)}">+</button></div>`:`<button class="btn sm add" type="button" data-q="1" data-p="${esc(p._id)}">Add</button>`):""}</div></div>`).join("")}</div>`:`<div class="empty">No products found.</div>`}`; }
+  if(S.tab==="orders"){ const list=S.orders.slice().sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+    html+=list.length?`<div class="list">${list.map(o=>`<button class="row" type="button" data-ord="${esc(o._id)}"><div><b>${esc(o.no||"Order")}</b><div class="small muted">Placed ${new Date(o.createdAt).toLocaleDateString("en-PH",{month:"short",day:"numeric"})}${o.pickupDate?` · pickup ${fmtDate(o.pickupDate)}`:""} · ${(o.items||[]).reduce((a,i)=>a+i.qty,0)} pcs</div></div><div class="r"><b class="num">${P(o.amount)}</b><div><span class="pill ${ORD_C[o.status]}">${ORD_L[o.status]}</span></div></div></button>`).join("")}</div>`:`<div class="empty">No orders yet. Open the Order tab to send your first one.</div>`; }
+  if(S.tab==="account") html+=`<section class="card"><dl class="kv"><dt>Name</dt><dd>${esc(d.name)}</dd>${d.phone?`<dt>Mobile</dt><dd>${esc(d.phone)}</dd>`:""}${d.area?`<dt>Address</dt><dd>${esc(d.area)}</dd>`:""}${d.terms!=null?`<dt>Payment terms</dt><dd>${d.terms} days</dd>`:""}<dt>Username</dt><dd>${esc(S.me.username)}</dd></dl></section>
+    <section class="card"><h3 style="font-size:16px;margin-bottom:10px">Change password</h3><form id="pw"><label>Current password<input id="pw1" type="password" autocomplete="current-password" required></label><label>New password<input id="pw2" type="password" autocomplete="new-password" minlength="8" required></label><button class="btn primary" type="submit">Change password</button></form></section>`;
+  const act=document.activeElement, fid=act&&act.id, pos=act&&act.selectionStart;
+  $("#main").innerHTML=html; $("#main").removeAttribute("aria-busy");
+  const T=cartTotals(); $("#cartbar").hidden=!T.lines||S.tab!=="catalog"; $("#cb-n").textContent=`${T.lines} product${T.lines===1?"":"s"} · ${T.n} pcs`; $("#cb-t").textContent=`Estimated ${P(T.total)}`;
+  if(fid){ const el=document.getElementById(fid); if(el&&el.closest("#main")){ el.focus(); try{ if(pos!=null) el.setSelectionRange(pos,pos); }catch(e){} } }
+}
+function receipt(id){
+  const t=S.txns.find(x=>x._id===id); if(!t) return; const s=S.settings, items=t.items||[], c=compute();
+  const title=t.opening?"OPENING BALANCE":{sale:"DELIVERY RECEIPT",payment:"ACKNOWLEDGEMENT RECEIPT",return:"RETURN SLIP"}[t.type];
+  $("#modalRoot").innerHTML=`<div class="overlay" id="ov"><div class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+    <div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn sm" id="close" type="button">Close</button></div>
+    <article class="receipt"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;border-bottom:2px solid #111;padding-bottom:8px;margin-bottom:8px"><b>${esc(s.storeName||"")}</b><div style="text-align:right;font-size:13px"><b>${title}</b><div>No. ${esc(t.no||"—")}</div><div>${fmtDate(t.date)}</div></div></div>
+    ${t.voided?`<p style="color:#b3261e;font-weight:700">This record was cancelled.</p>`:""}
+    ${items.length?`<table><thead><tr><th>Item</th><th class="r">Qty</th><th class="r">Amount</th></tr></thead><tbody>${items.map(i=>`<tr><td>${esc(i.name)}<div style="color:#666;font-size:12px">${P(i.price)} each</div></td><td class="r">${i.qty}</td><td class="r">${P(i.qty*i.price)}</td></tr>`).join("")}</tbody></table>
+      ${t.pctDiscount?`<div style="display:flex;justify-content:space-between"><span>Total at SRP</span><span>${P(t.subtotal)}</span></div><div style="display:flex;justify-content:space-between"><span>${discLabel(t)}</span><span>−${P(t.pctDiscount)}</span></div>`:""}${t.discount?`<div style="display:flex;justify-content:space-between"><span>Extra discount</span><span>−${P(t.discount)}</span></div>`:""}`:""}
+    <div class="rc-total" style="margin-top:8px"><span>${t.type==="sale"?"Total on credit":t.type==="payment"?"Amount received":"Total credited"}</span><b>${P(t.amount)}</b></div>
+    ${t.type==="sale"?`<p>Due date: <b>${fmtDate(t.dueDate)}</b></p>`:""}${t.type==="payment"?`<p>Paid by ${esc(t.method||"")}${t.ref?" · Ref "+esc(t.ref):""}</p>`:""}
+    ${t.voided?"":`<p>Your balance after this: <b>${P(c.runAt.get(t))}</b></p>`}
+    ${t.type==="payment"&&(t.applied||[]).length?`<table><thead><tr><th>Applied to</th><th class="r">Paid</th><th class="r">Still owed</th></tr></thead><tbody>${t.applied.map(a=>`<tr><td>${esc(a.no)}</td><td class="r">${P(a.amount)}</td><td class="r">${a.left>0.004?P(a.left):"Fully paid"}</td></tr>`).join("")}</tbody></table>`:""}
+    <p style="font-size:12px;color:#666;text-align:center;margin-bottom:0">This is not an official receipt.</p></article></div></div>`;
+  const close=()=>{ $("#modalRoot").innerHTML=""; };
+  $("#close").addEventListener("click",close); $("#ov").addEventListener("mousedown",e=>{ if(e.target.id==="ov") close(); });
+  $("#close").focus();
+}
+function modal(html,mount){ $("#modalRoot").innerHTML=`<div class="overlay" id="ov"><div class="modal" role="dialog" aria-modal="true">${html}</div></div>`;
+  const close=()=>{ $("#modalRoot").innerHTML=""; }; $("#ov").addEventListener("mousedown",e=>{ if(e.target.id==="ov") close(); }); const cl=$("#close"); if(cl){ cl.addEventListener("click",close); cl.focus(); } mount&&mount(close); }
+function reviewOrder(){
+  const tomorrow=(()=>{ const d=new Date(); d.setDate(d.getDate()+1); return ymd(d); })();
+  const draw=()=>{ const T=cartTotals(); const rows=[...S.cart].map(([pid,q])=>{ const p=S.products.find(x=>x._id===pid); return p?{p,q}:null; }).filter(Boolean);
+    return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><h2 style="font-size:20px">Review your order</h2><button class="btn sm" id="close" type="button">Close</button></div>
+    <table class="otbl"><thead><tr><th>Product</th><th class="r">Qty</th><th class="r">Amount</th></tr></thead><tbody>${rows.map(({p,q})=>`<tr><td><b>${esc(p.name)}</b><div class="small muted num">SRP ${P(unitPrice(p))}</div></td><td class="r"><div class="qty" style="justify-content:flex-end;margin:0"><button class="btn" type="button" data-q="-1" data-p="${esc(p._id)}" aria-label="One less">${q>1?"−":"✕"}</button><span class="num" style="min-width:28px;text-align:center">${q}</span><button class="btn" type="button" data-q="1" data-p="${esc(p._id)}" aria-label="One more">+</button></div></td><td class="r num">${P(q*unitPrice(p))}</td></tr>`).join("")}</tbody></table>
+    <div style="margin:10px 0 14px"><div class="tot"><span class="muted">Total at SRP</span><span class="num">${P(T.sub)}</span></div><div class="tot"><span class="muted">${T.pct!=null?`Less ${T.pct}% dealer discount`:"Less dealer discount"}</span><span class="num">−${P(T.disc)}</span></div><div class="tot g"><span>Estimated total</span><span class="num">${P(T.total)}</span></div>
+    <p class="small muted" style="margin:6px 0 0">The store confirms the final amount when you pick up. It's added to your account as a credit delivery.</p></div>
+    <form id="of"><label>Pickup date<input id="o-date" type="date" min="${today()}" value="${tomorrow}"></label><label>Note for the store (optional)<input id="o-note" maxlength="500" placeholder="e.g. I'll come after lunch"></label><button class="btn primary" type="submit" id="o-send" ${rows.length?"":"disabled"}>Send order</button></form>`; };
+  modal(draw(),function mount(close){
+    $("#ov").addEventListener("click",e=>{ const b=e.target.closest("[data-q]"); if(!b) return; bump(b.dataset.p,+b.dataset.q); if(!S.cart.size){ close(); render(); return; } const keep={d:$("#o-date").value,n:$("#o-note").value}; $(".modal").innerHTML=draw(); $("#o-date").value=keep.d; $("#o-note").value=keep.n; rebind(close); });
+    rebind(close);
+  });
+  function rebind(close){ $("#close").addEventListener("click",close);
+    $("#of").addEventListener("submit",async e=>{ e.preventDefault(); const b=$("#o-send"); b.disabled=true; b.textContent="Sending…";
+      try{ const id=(crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random()).replace(/[^A-Za-z0-9]/g,"").slice(0,20);
+        const r=await api("PUT","/api/c/orders/"+id,{data:{items:[...S.cart].map(([productId,qty])=>({productId,qty})),pickupDate:$("#o-date").value||null,note:$("#o-note").value.trim()}});
+        S.cart.clear(); saveCart(); close(); S.tab="orders"; await load(); toast(`Order ${r.data.no} sent. We'll prepare it for you.`);
+      }catch(err){ toast(err.message); b.disabled=false; b.textContent="Send order"; } }); }
+}
+function orderDetail(id){
+  const o=S.orders.find(x=>x._id===id); if(!o) return; const step=STEP[o.status]||0;
+  modal(`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><h2 style="font-size:20px">Order ${esc(o.no||"")}</h2><button class="btn sm" id="close" type="button">Close</button></div>
+    <span class="pill ${ORD_C[o.status]}">${ORD_L[o.status]}</span>${o.cancelReason?` <span class="small muted">${esc(o.cancelReason)}</span>`:""}
+    ${o.status!=="cancelled"?`<div class="steps" aria-hidden="true">${[1,2,3,4].map(k=>`<span class="${k<=step?"on":""}"></span>`).join("")}</div><div class="small muted" style="display:flex;justify-content:space-between"><span>Received</span><span>Preparing</span><span>Ready</span><span>Released</span></div>`:""}
+    <table class="otbl" style="margin-top:12px"><thead><tr><th>Product</th><th class="r">Qty</th><th class="r">Amount</th></tr></thead><tbody>${(o.items||[]).map(i=>`<tr><td>${esc(i.name)}</td><td class="r num">${i.qty}</td><td class="r num">${P(i.qty*i.price)}</td></tr>`).join("")}</tbody></table>
+    <div style="margin:10px 0"><div class="tot"><span class="muted">Total at SRP</span><span class="num">${P(o.subtotal)}</span></div><div class="tot"><span class="muted">${discLabel(o)}</span><span class="num">−${P(o.pctDiscount)}</span></div><div class="tot g"><span>Estimated total</span><span class="num">${P(o.amount)}</span></div></div>
+    <dl class="kv"><dt>Pickup</dt><dd>${o.pickupDate?fmtDate(o.pickupDate):"Anytime"}</dd>${o.note?`<dt>Your note</dt><dd>${esc(o.note)}</dd>`:""}${o.saleNo?`<dt>Delivery receipt</dt><dd>${esc(o.saleNo)}</dd>`:""}</dl>
+    ${o.status==="new"?`<button class="btn" type="button" id="o-cancel" style="margin-top:14px;color:var(--bad);border-color:var(--bad)">Cancel this order</button>`:o.status==="preparing"||o.status==="ready"?`<p class="small muted" style="margin-top:12px">Need to change something? Message ${esc(S.settings.storeName||"the store")}${S.settings.phone?" at "+esc(S.settings.phone):""}.</p>`:""}`,
+  close=>{ const c=$("#o-cancel"); if(c) c.addEventListener("click",async()=>{ if(!c.dataset.armed){ c.dataset.armed="1"; c.textContent="Tap again to cancel"; return; } c.disabled=true;
+    try{ await api("PATCH","/api/c/orders/"+encodeURIComponent(id),{data:{status:"cancelled"}}); close(); await load(); toast("Order cancelled"); }catch(err){ toast(err.message); c.disabled=false; } }); });
+}
+function bump(pid,d){ const q=Math.max(0,(S.cart.get(pid)||0)+d); if(q) S.cart.set(pid,q); else S.cart.delete(pid); saveCart(); }
+document.addEventListener("keydown",e=>{ if(e.key==="Escape") $("#modalRoot").innerHTML=""; });
+document.addEventListener("click",e=>{
+  const tb=e.target.closest("[data-tab]"); if(tb){ S.tab=tb.dataset.tab; render(); const m=$("#main"); m.classList.remove("tab-in"); void m.offsetWidth; m.classList.add("tab-in"); return; }
+  const rc=e.target.closest("[data-rc]"); if(rc){ receipt(rc.dataset.rc); return; }
+  const od=e.target.closest("[data-ord]"); if(od){ orderDetail(od.dataset.ord); return; }
+  if(e.target.closest("#ov")) return;
+  const qb=e.target.closest("[data-q]"); if(qb){ bump(qb.dataset.p,+qb.dataset.q); render(); return; }
+  if(e.target.id==="cb-go"){ reviewOrder(); return; }
+  if(e.target.id==="copyPay"){ const txt=S.settings.paymentInfo||""; try{ navigator.clipboard.writeText(txt).then(()=>toast("Copied"),()=>toast("Select the text to copy it")); }catch(_){ toast("Select the text to copy it"); } }
+});
+document.addEventListener("input",e=>{ if(e.target.id==="q"){ S.q=e.target.value; render(); } });
+document.addEventListener("change",e=>{ const pid=e.target.dataset&&e.target.dataset.setq; if(pid){ const q=Math.max(0,Math.round(Number(e.target.value)||0)); if(q) S.cart.set(pid,q); else S.cart.delete(pid); saveCart(); render(); } });
+document.addEventListener("submit",async e=>{ if(e.target.id!=="pw") return; e.preventDefault(); const b=e.target.querySelector("button"); b.disabled=true;
+  try{ await api("POST","/api/me/password",{current:$("#pw1").value,next:$("#pw2").value}); toast("Password changed"); e.target.reset(); }catch(err){ toast(err.message); } b.disabled=false; });
+$("#logout").addEventListener("click",()=>api("POST","/api/logout").finally(()=>location.href="/login"));
+
+async function load(){
+  try{
+    const [me,dealers,txns,products,settings,orders]=await Promise.all([api("GET","/api/me"),api("GET","/api/c/dealers"),api("GET","/api/c/txns"),api("GET","/api/c/products"),api("GET","/api/c/settings"),api("GET","/api/c/orders")]);
+    S.orders=orders.map(r=>({...r.data,_id:r.id}));
+    S.me=me; S.dealer=dealers[0]?dealers[0].data:null; S.txns=txns.map(r=>({...r.data,_id:r.id})); S.products=products.map(r=>({...r.data,_id:r.id})); for(const k of [...S.cart.keys()]) if(!S.products.find(p=>p._id===k)) S.cart.delete(k); S.settings=settings[0]?settings[0].data:{};
+    $("#sync").textContent="Updated "+new Date().toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"}); render();
+  }catch(e){ $("#sync").textContent="Couldn't load your account. Check your internet connection."; }
+}
+load();
+let t; const later=()=>{ clearTimeout(t); t=setTimeout(load,300); };
+if(window.EventSource){ const es=new EventSource("/api/events"); es.addEventListener("change",later); }
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible") load(); });
+})();
+</script>
+</body>
+</html>
