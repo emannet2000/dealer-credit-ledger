@@ -313,6 +313,7 @@ body.scrolled header{box-shadow:0 4px 18px rgba(0,0,0,.07)}
 .link-row{display:flex;gap:8px;flex-wrap:wrap}
 .link-row input{flex:1 1 240px;min-width:0}
 .pick-amt{width:7.5em;flex:none}
+.linkbtn{background:none;border:0;padding:0;font:inherit;color:var(--accent);text-decoration:underline;cursor:pointer}
 .pill.tag{font-size:11px;padding:1px 6px;margin-top:3px}
 pre.stmt{white-space:pre-wrap;background:var(--sunk);padding:12px;border-radius:8px;font-size:13px;max-height:280px;overflow:auto;margin:0}
 .thumb{width:44px;height:44px;border-radius:8px;object-fit:cover;background:var(--sunk);border:1px solid var(--line);flex:none;display:block}
@@ -2307,7 +2308,7 @@ function restoreFlow(file){
 
 /* ================= team accounts (Node.js server) ================= */
 const ROLE_L={owner:"Owner",editor:"Editor",staff:"Staff",viewer:"Viewer",dealer:"Dealer portal"};
-async function loadTeam(){ try{ S.acct=await window.APP.me(); S.team=await window.APP.users(); $("#acct").textContent=`${S.acct.name} · ${ROLE_L[S.acct.role]}`; render(); loadBackupStatus(); }catch(e){} }
+async function loadTeam(){ try{ S.acct=await window.APP.me(); S.team=await window.APP.users(); $("#acct").innerHTML=`Signed in as <b>${esc(S.acct.name)}</b> (${esc(ROLE_L[S.acct.role]||S.acct.role)}) · <button class="linkbtn" data-act="logout" type="button">Sign out</button>`; render(); loadBackupStatus(); }catch(e){} }
 // Server backup health for owners and editors (FR-067, PR-08).
 async function loadBackupStatus(){ if(!window.APP||!window.APP.backupStatus||!S.acct||!["owner","editor"].includes(S.acct.role)) return; try{ S.backup=await window.APP.backupStatus(); render(); }catch(e){} }
 setInterval(loadBackupStatus,3600e3);
@@ -2318,9 +2319,18 @@ function backupProblems(){ const b=S.backup; if(!b) return []; const out=[], now
   if(!b.offsiteConfigured) out.push(["warn","Backups are kept only on this server. Set BACKUP_SYNC_CMD so a copy goes offsite."]);
   else if(b.offsite&&b.offsite.lastErrorAt&&(!b.offsite.lastSuccessAt||b.offsite.lastErrorAt>b.offsite.lastSuccessAt)) out.push(["bad",`The offsite backup copy failed: ${b.offsite.lastError}`]);
   return out; }
+function portalPanel(){
+  const me=S.acct||{}, owner=me.role==="owner", list=(S.team||[]).filter(u=>u.role==="dealer"), link=location.origin+"/login";
+  return `<section class="panel"><div class="panel-head"><h2>Dealer portal</h2>${owner?`<button class="btn sm primary" data-act="new-portal" type="button">+ Give a dealer portal access</button>`:""}</div>
+    <p class="small" style="margin-top:0">Dealers sign in at the same address as your team. They see only their own balance, unpaid deliveries, receipts and payment history, can order online, and accept your privacy notice.</p>
+    <div class="link-row" style="margin-bottom:12px"><input readonly value="${esc(link)}" aria-label="Sign-in link for dealers" id="portal-link"><button class="btn sm" type="button" data-act="copy-portal-link">Copy link</button><a class="btn sm" href="/login" target="_blank" rel="noopener">Open sign-in page</a></div>
+    ${list.length?`<table><thead><tr><th>Dealer</th><th>Username</th><th>Status</th></tr></thead><tbody>${list.map(u=>{ const d=S.dealers.get(u.dealerId); return `<tr ${owner?`class="click" tabindex="0" data-act="edit-user" data-id="${u.id}"`:""}><td>${d?`<div class="prod-cell">${avatar(d,28)}<b>${esc(d.name)}</b></div>`:"(dealer removed)"}</td><td class="small">${esc(u.username||"")}</td><td><span class="pill ${u.active?"good":"bad"}">${u.active?"Can sign in":"Disabled"}</span></td></tr>`; }).join("")}</tbody></table>`
+      :`<p class="small muted" style="margin:0">No dealer has portal access yet. ${owner?"Tap “Give a dealer portal access”, choose the dealer and a username and password, then send them the link above.":"Ask the owner to set it up."}</p>`}
+  </section>`;
+}
 function teamPanel(){
   const me=S.acct||{}, owner=me.role==="owner", list=S.team||[];
-  return `<section class="panel"><div class="panel-head"><h2>Team accounts</h2>${owner?`<button class="btn sm primary" data-act="new-user" type="button">+ Add person</button>`:""}</div>
+  return portalPanel()+`<section class="panel"><div class="panel-head"><h2>Team accounts</h2>${owner?`<button class="btn sm primary" data-act="new-user" type="button">+ Add person</button>`:""}</div>
     ${list.length?`<table><tbody>${list.map(u=>`<tr><td><b>${esc(u.name)}</b>${u.id===me.id?" (you)":""}<div class="small muted">${esc(u.username||"")}</div></td><td><span class="pill ${u.active?(u.role==="dealer"?"good":"neutral"):"bad"}">${u.active?ROLE_L[u.role]:"Disabled"}</span>${u.twoStep?` <span class="pill good">2-step</span>`:""}${u.role==="dealer"&&u.dealerId?`<div class="small muted">${esc((S.dealers.get(u.dealerId)||{}).name||"")}</div>`:""}</td><td class="r">${owner&&u.id!==me.id?`<button class="btn sm" data-act="edit-user" data-id="${esc(u.id)}" type="button">Edit</button>`:""}</td></tr>`).join("")}</tbody></table>`:`<p class="small muted">Loading…</p>`}
     <dl class="kv" style="margin-top:12px"><dt><span class="pill neutral">Staff</span></dt><dd>Record sales, payments, returns and stock. Can edit or void only what they recorded today. Can't change prices, credit limits or settings, or release goods to dealers on hold.</dd>
     <dt><span class="pill neutral">Editor</span></dt><dd>Everything staff can do, plus store settings, credit rules, prices, approving credit holds and editing any record.</dd>
@@ -2342,12 +2352,12 @@ function auditTable(){
     return ""; };
   return `<div class="tbl-wrap" style="max-height:420px;overflow:auto"><table><thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead><tbody>${S.audit.map(a=>`<tr><td class="small nowrap">${fmtStamp(a.at)}</td><td class="small">${esc(a.user_name||"—")}</td><td class="small">${esc(lbl[a.action]||a.action)} ${a.collection&&!["txns","users"].includes(a.collection)?`<span class="muted">${esc(a.collection)}</span> `:""}${what(a)}</td></tr>`).join("")}</tbody></table></div>`;
 }
-function userForm(id,presetDealer){
+function userForm(id,presetDealer,presetRole){
   const u=id?(S.team||[]).find(x=>x.id===id):null; const pd=presetDealer?S.dealers.get(presetDealer):null;
   show(()=>[head(u?`Edit ${esc(u.name)}`:"Add a person")+`<form id="f" class="form-grid">
     <label class="f span">Full name<input id="u-name" required maxlength="80" value="${esc(u?u.name:pd?pd.name:"")}"></label>
     ${u?`<div class="f"><span>Username</span><b style="color:var(--fg)">${esc(u.username)}</b></div>`:`<label class="f">Username<input id="u-user" required autocapitalize="none" placeholder="e.g. ben" pattern="[A-Za-z0-9._\\-]{3,40}"><span class="hint">3–40 letters or numbers. They type this to sign in.</span></label>`}
-    <label class="f">Role<select id="u-role">${["staff","editor","viewer","dealer"].map(r=>`<option value="${r}" ${(u?u.role===r:pd&&r==="dealer")?"selected":""}>${ROLE_L[r]}</option>`).join("")}</select></label>
+    <label class="f">Role<select id="u-role">${["staff","editor","viewer","dealer"].map(r=>`<option value="${r}" ${(u?u.role===r:(pd||presetRole==="dealer")&&r==="dealer")?"selected":""}>${ROLE_L[r]}</option>`).join("")}</select></label>
     <label class="f span" id="u-dwrap">Which dealer<select id="u-dealer"><option value="">Choose dealer…</option>${activeDealers().map(([did,dd])=>`<option value="${did}" ${(u?u.dealerId===did:presetDealer===did)?"selected":""}>${esc(dd.name)}</option>`).join("")}</select><span class="hint">They will only see this dealer's own records.</span></label>
     <label class="f">${u?"New password (leave blank to keep)":"Password"}<input id="u-pw" type="password" autocomplete="new-password" ${u?"":"required"} minlength="8" placeholder="At least 8 characters"></label>
     ${u?`<label class="chk span"><input type="checkbox" id="u-active" ${u.active?"checked":""}> Account active (untick to block sign-in right away)</label>`:""}
@@ -2357,6 +2367,7 @@ function userForm(id,presetDealer){
     const so=$("#u-signout",sh); if(so) so.addEventListener("click",()=>{ if(armed(so,"Tap again to sign out")) guarded(so,async()=>{ await window.APP.signoutUser(u.id); toast(`${u.name} was signed out everywhere`); so.disabled=false; so.textContent="Sign out everywhere"; }); });
     const r2b=$("#u-reset2",sh); if(r2b) r2b.addEventListener("click",()=>{ if(armed(r2b,"Tap again to reset")) guarded(r2b,async()=>{ await window.APP.updateUser(u.id,{resetTwoStep:true}); await loadTeam(); toast(`Two-step sign-in reset for ${u.name}. They can set it up again.`); back(); }); });
     const syncRole=()=>{ $("#u-dwrap",sh).hidden=$("#u-role",sh).value!=="dealer"; }; $("#u-role",sh).addEventListener("change",syncRole); syncRole();
+    $("#u-dealer",sh).addEventListener("change",e=>{ const d=S.dealers.get(e.target.value), n=$("#u-name",sh); if(d&&!n.value.trim()) n.value=d.name; });
     $("#f",sh).addEventListener("submit",e=>{ e.preventDefault(); const btn=e.submitter||$("button[type=submit]",sh);
       const pw=$("#u-pw").value; const body={name:$("#u-name").value.trim(),role:$("#u-role").value};
       if(body.role==="dealer"){ body.dealerId=$("#u-dealer").value; if(!body.dealerId){ toast("Choose which dealer this account is for"); return; } }
@@ -2435,7 +2446,7 @@ document.addEventListener("click",e=>{
        "pd-export":()=>guarded(a,async()=>{ const data=await window.APP.exportDealer(id); await save(`personal-data-${(S.dealers.get(id)||{}).name||id}.json`.replace(/[^\w.-]+/g,"_"),JSON.stringify(data,null,1)); a.disabled=false; }),
        "pd-remove":()=>{ if(!armed(a,"Tap again: remove name, phone, address and notes")) return; guarded(a,async()=>{ await window.APP.anonymiseDealer(id); toast("Personal data removed. Financial records were kept."); closeAll(); }); }, "approvals":()=>approvalsSheet(),
        "load-audit":()=>guarded(a,async()=>{ S.audit=await window.APP.audit(150); render(); }),
-       "go-store":()=>goView("store"), "all-dealers":()=>{ S.allDealers=true; render(); }, "set-targets":()=>targetsSheet(), "owner-summary":()=>ownerSummarySheet(), "more-tx":()=>{ S.txShow=(S.txShow||100)+500; render(); }, "more-collect":()=>{ S.collectShow=Infinity; render(); }, "backup-run":()=>guarded(a,async()=>{ a.textContent="Backing up…"; try{ S.backup=await window.APP.backupRun(); toast("Backup made and verified"); }catch(e){ if(e&&e.status===500) await loadBackupStatus(); throw e; } render(); }),
+       "go-store":()=>goView("store"), "new-portal":()=>userForm(null,null,"dealer"), "copy-portal-link":()=>copyText(location.origin+"/login","Sign-in link"), "all-dealers":()=>{ S.allDealers=true; render(); }, "set-targets":()=>targetsSheet(), "owner-summary":()=>ownerSummarySheet(), "more-tx":()=>{ S.txShow=(S.txShow||100)+500; render(); }, "more-collect":()=>{ S.collectShow=Infinity; render(); }, "backup-run":()=>guarded(a,async()=>{ a.textContent="Backing up…"; try{ S.backup=await window.APP.backupRun(); toast("Backup made and verified"); }catch(e){ if(e&&e.status===500) await loadBackupStatus(); throw e; } render(); }),
        "go-dealers":()=>goView("dealers"), "go-collect":()=>goView("collect"), "count":()=>countSheet(),
        "opening-for":()=>openingForm(id), "new-opening":()=>openingForm(),
        "remind-copy":()=>copyText(reminderText(id),"Reminder message"),

@@ -6,7 +6,7 @@
 <title>Sign in · Dealer Credit Ledger</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700&family=Public+Sans:wght@400;600;700&display=swap">
-<style>
+<style>[hidden]{display:none!important}
 :root{--bg:#f5f7f6;--surface:#fff;--line:#d5dedb;--fg:#15211e;--muted:#5b6b67;--accent:#0d6b5c;--accent-fg:#fff;--bad:#b3261e;--bad-soft:#f9dedc;color-scheme:light}
 @media (prefers-color-scheme:dark){:root{--bg:#0f1514;--surface:#172120;--line:#2a3836;--fg:#e3ece9;--muted:#93a5a0;--accent:#4cc3a9;--accent-fg:#06201b;--bad:#f2847b;--bad-soft:#3d1d1a;color-scheme:dark}}
 *{box-sizing:border-box}
@@ -27,7 +27,7 @@ button[disabled]{opacity:.6}
 <body>
 <main class="card">
   <h1 id="h">Sign in</h1>
-  <p id="sub">Dealer Credit Ledger</p>
+  <p id="sub">Dealer Credit Ledger · for the owner, staff and dealers</p>
   <form id="f" novalidate>
     <div class="err" id="err" hidden></div>
     <label id="nameRow" hidden>Your name<input id="name" autocomplete="name"></label>
@@ -48,14 +48,7 @@ button[disabled]{opacity:.6}
     history.replaceState(null, "", "/login");
   }
   let setup = false;
-  try { setup = (await (await fetch("/api/setup")).json()).needsSetup; } catch (e) {}
-  if (setup) {
-    $("#h").textContent = "Create the owner account";
-    $("#sub").textContent = "This is the first time the ledger is opened. The owner can add staff accounts later.";
-    $("#nameRow").hidden = false; $("#go").textContent = "Create account";
-    $("#password").autocomplete = "new-password"; $("#password").placeholder = "At least 8 characters";
-    $("#name").focus();
-  } else $("#username").focus();
+  // The sign-in handler is attached before anything is awaited, so an early click can't reload the page.
   $("#f").addEventListener("submit", async (e) => {
     e.preventDefault();
     const btn = $("#go"); btn.disabled = true; $("#err").hidden = true;
@@ -70,6 +63,14 @@ button[disabled]{opacity:.6}
       location.href = "/";
     } catch (err) { $("#err").textContent = err.message; $("#err").hidden = false; btn.disabled = false; }
   });
+  try { setup = (await (await fetch("/api/setup")).json()).needsSetup; } catch (e) {}
+  if (setup) {
+    $("#h").textContent = "Create the owner account";
+    $("#sub").textContent = "This is the first time the ledger is opened. The owner can add staff accounts later.";
+    $("#nameRow").hidden = false; $("#go").textContent = "Create account";
+    $("#password").autocomplete = "new-password"; $("#password").placeholder = "At least 8 characters";
+    $("#name").focus();
+  } else $("#username").focus();
 })();
 </script>
 </body>

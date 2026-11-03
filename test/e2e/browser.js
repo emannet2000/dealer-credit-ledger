@@ -49,7 +49,7 @@ async function startBrowser() {
     fill: async (sel, v) => { await b.waitFor(`document.querySelector(${JSON.stringify(sel)})`); await ev(`(()=>{ const e=document.querySelector(${JSON.stringify(sel)}); e.value=${JSON.stringify(v)}; e.dispatchEvent(new Event("input",{bubbles:true})); e.dispatchEvent(new Event("change",{bubbles:true})); })()`); },
     text: (sel) => ev(`document.querySelector(${JSON.stringify(sel)})?.innerText || ""`),
     signIn: async (base, cookie) => { await cdp("Network.setCookie", { url: base, name: "sid", value: cookie.split("=")[1] }); await cdp("Page.navigate", { url: base + "/" }); await b.waitFor("/updates live/.test(document.querySelector('#sync')?.textContent||'')", 15000); },
-    close: () => { ch.kill(); ws.close(); fs.rmSync(profile, { recursive: true, force: true }); },
+    close: () => { ch.kill(); ws.close(); try { fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch {} },
   };
   return b;
 }

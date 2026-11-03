@@ -83,3 +83,17 @@ test("a blocked staff sale is sent for approval and the owner approves it", { sk
   assert.equal(await stock(), before - 1);
   assert.deepEqual(b.errors, []);
 });
+
+test("the owner gives a dealer portal access and the dealer signs in", { skip }, async () => {
+  await b.signIn(app.base, app.jar.owner);
+  await b.click(".tab[data-view=store]");
+  await b.click("[data-act=new-portal]");
+  await b.fill("#u-dealer", "d1"); await b.fill("#u-user", "ana"); await b.fill("#u-pw", "anapass123");
+  await b.click("#f button[type=submit]");
+  await b.waitFor("[...document.querySelectorAll('.panel')].some(p=>p.querySelector('h2')?.innerText==='Dealer portal' && /ana/.test(p.innerText))");
+  await b.click("#acct [data-act=logout]");
+  await b.waitFor("location.pathname==='/login' && document.querySelector('#nameRow').hidden && document.querySelector('#codeRow').hidden");
+  await b.fill("#username", "ana"); await b.fill("#password", "anapass123"); await b.click("#go");
+  await b.waitFor("/Hi, Ana/.test(document.body.innerText)", 15000).catch(async (e) => { throw new Error(e.message + " | page: " + (await b.ev("location.pathname + ' ' + document.body.innerText.slice(0,300)"))); });
+  assert.match(await b.text("body"), /YOUR BALANCE/i);
+});
