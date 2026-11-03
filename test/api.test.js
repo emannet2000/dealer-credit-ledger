@@ -755,3 +755,62 @@ test("two-step sign-in, shorter staff sessions and remote sign-out (PR-10)", asy
   assert.equal(await cookieDays("ben", "staffpass1"), 7);
   assert.equal(await cookieDays("eve", "editorpass1"), 30);
 });
+
+test("personal data: consent, viewer limits, export and removal (PR-06, FR-078)", async () => {
+  const store = (await owner("GET", "/api/c/settings")).data.find((x) => x.id === "store").data;
+  const v1 = (await owner("PUT", "/api/c/settings/store", { data: { ...store, privacyNotice: "We use your data to sell on credit." } })).data.data.privacyVersion;
+  assert.match(v1, /^\d{4}-\d{2}-\d{2}/);
+  const s2 = (await owner("GET", "/api/c/settings")).data.find((x) => x.id === "store").data;
+  const v2 = (await owner("PUT", "/api/c/settings/store", { data: { ...s2, privacyNotice: "Updated notice." } })).data.data.privacyVersion;
+  assert.notEqual(v2, v1, "a changed notice gets a new version");
+
+  // Staff record consent; the server stamps who, when and which notice.
+  await owner("PUT", "/api/c/dealers/pd1", { data: { name: "Private Pia", phone: "0917 000 1111", birthday: "1990-05-05", address: "12 Rizal St", notes: "Pays Fridays" } });
+  const cur = (await owner("GET", "/api/c/dealers")).data.find((d) => d.id === "pd1").data;
+  const c1 = await staff("PUT", "/api/c/dealers/pd1", { data: { ...cur, consent: { method: "signed form" } } });
+  assert.equal(c1.data.data.consent.noticeVersion, v2);
+  assert.equal(c1.data.data.consent.method, "signed form");
+  assert.equal((await staff("PUT", "/api/c/dealers/pd1", { data: { ...cur, consent: { method: "portal" } } })).status, 400, "only dealers accept in the portal");
+  const again = await staff("PUT", "/api/c/dealers/pd1", { data: { ...c1.data.data, notes: "Pays Fridays, cash" } });
+  assert.equal(again.data.data.consent.at, c1.data.data.consent.at, "unrelated edits keep the consent record");
+
+  // Viewers see no personal fields and no contact notes.
+  await owner("PUT", "/api/c/interactions/pd-i1", { data: { dealerId: "pd1", kind: "call", date: day(0), note: "Talked about her family" } });
+  const seen = (await viewer("GET", "/api/c/dealers")).data.find((d) => d.id === "pd1").data;
+  assert.equal(seen.name, "Private Pia");
+  for (const k of ["phone", "birthday", "address", "notes", "consent"]) assert.equal(seen[k], undefined, k);
+  assert.deepEqual((await viewer("GET", "/api/c/interactions")).data, []);
+
+  // A dealer accepts the notice in the portal.
+  const portal = client();
+  await portal("POST", "/api/login", { username: "maria", password: "dealerpass1" });
+  assert.equal((await portal("GET", "/api/c/settings")).data[0].data.privacyVersion, v2);
+  assert.equal((await portal("POST", "/api/portal/consent")).data.consent.noticeVersion, v2);
+  assert.equal((await portal("GET", "/api/c/dealers")).data[0].data.consent.method, "portal");
+
+  // Opening a profile is logged.
+  await staff("POST", "/api/dealers/pd1/viewed");
+  const log = (await owner("GET", "/api/audit")).data;
+  assert.ok(log.some((a) => a.action === "view_profile" && a.doc_id === "pd1"));
+
+  // Export everything held about one dealer (owner only).
+  assert.equal((await staff("GET", "/api/dealers/pd1/export")).status, 403);
+  const ex = await owner("GET", "/api/dealers/pd1/export");
+  assert.equal(ex.data.dealer.birthday, "1990-05-05");
+  assert.equal(ex.data.contactLog.length, 1);
+  assert.ok(ex.data.accessLog.some((a) => a.action === "view_profile"));
+
+  // Removal: refused while a balance is owed; allowed for a lost prospect with no records.
+  await owner("PUT", "/api/c/txns/pd-s1", { data: { type: "sale", opening: true, dealerId: "pd1", date: day(-5), dueDate: day(25), amount: 100, items: [] } });
+  const refused = await owner("POST", "/api/dealers/pd1/anonymise");
+  assert.equal(refused.status, 409);
+  assert.equal(refused.data.code, "retention");
+  await owner("PUT", "/api/c/dealers/pd2", { data: { name: "Lost Lena", stage: "lost", phone: "0918 222", email: "lena@example.com" } });
+  await owner("PUT", "/api/c/interactions/pd-i2", { data: { dealerId: "pd2", kind: "visit", date: day(0), note: "Not interested" } });
+  assert.equal((await owner("POST", "/api/dealers/pd2/anonymise")).status, 200);
+  const gone = (await owner("GET", "/api/c/dealers")).data.find((d) => d.id === "pd2").data;
+  assert.match(gone.name, /^Removed dealer/);
+  assert.equal(gone.phone, undefined);
+  assert.equal(gone.email, undefined);
+  assert.ok(!(await owner("GET", "/api/c/interactions")).data.some((i) => i.id === "pd-i2"));
+});

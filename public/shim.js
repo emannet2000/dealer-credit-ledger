@@ -257,6 +257,9 @@
     audit: (limit = 150) => api("GET", "/api/audit?limit=" + limit),
     backupFull: () => api("GET", "/api/backup/full"),
     backupStatus: () => api("GET", "/api/backup/status"),
+    exportDealer: (id) => api("GET", "/api/dealers/" + encodeURIComponent(id) + "/export"),
+    anonymiseDealer: (id) => api("POST", "/api/dealers/" + encodeURIComponent(id) + "/anonymise", {}).then((r) => (refresh("dealers"), refresh("interactions"), r)),
+    viewedDealer: (id) => api("POST", "/api/dealers/" + encodeURIComponent(id) + "/viewed", {}).catch(() => {}),
     backupRun: () => api("POST", "/api/backup/run", {}),
     backupRestore: (backup, replace = false) => api("POST", "/api/backup/restore", { backup, replace }),
     // Offline state for the page: { online, pending, held: [{id, data, error}], lastSync, syncing }

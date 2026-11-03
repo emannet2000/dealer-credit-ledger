@@ -137,6 +137,10 @@ With `COOKIE_SECURE=true` the app also redirects any plain-HTTP request it recei
 - **Lost phone:** the owner opens the person in **Store → Team accounts** and taps **Sign out everywhere**. When that phone next connects, it deletes the ledger data it saved for offline use. **Reset two-step sign-in** lets someone who lost their authenticator set it up again.
 - Changing a password or disabling an account also signs out that person's other devices.
 
+## Privacy
+
+The app has tools for the Data Privacy Act: a privacy notice dealers accept in the portal, consent records, a per-dealer data export, removal of personal data on request, and a log of who opened each dealer's profile. Viewer accounts don't see personal details. See [docs/PRIVACY.md](docs/PRIVACY.md) for what is stored, what the business still has to do (privacy notice, DPO, NPC registration check) and the data breach response steps.
+
 ## Backups
 
 The server makes a backup every day in `DATA_DIR/backups/ledger-YYYY-MM-DD.db` and keeps the last `BACKUP_KEEP` days. Each backup is opened and checked with SQLite's integrity check right after it is made. **Store → Server backups** shows the last good backup, whether the offsite copy worked, and a **Back up and verify now** button. Owners and editors also see a warning on the Overview when the last good backup is more than 7 days old, a backup or offsite copy failed, or no offsite copy is set up. Set `ALERT_WEBHOOK_URL` or `ALERT_CMD` to be told about failures right away.

@@ -187,6 +187,7 @@ function render(){
       <div><span class="small muted">Last payment</span><b class="num">${c.lastPay?P(c.lastPay.amount):"—"}</b>${c.lastPay?`<span class="small muted">${fmtDate(c.lastPay.date)}</span>`:""}</div>
       <div><span class="small muted">Paid on time</span><b class="num">${c.settled?Math.round(c.onTime/c.settled*100)+"%":"—"}</b>${c.settled?`<span class="small muted">${c.onTime} of ${c.settled} deliveries</span>`:""}</div>
     </div></section>`;
+  if(s.privacyNotice&&!(d.consent&&d.consent.noticeVersion===s.privacyVersion)) html+=`<section class="card"><h3 style="font-size:16px;margin-top:0">${d.consent?"Our privacy notice changed":"How we use your information"}</h3><p style="white-space:pre-wrap">${esc(s.privacyNotice)}</p><button class="btn" id="consentBtn" type="button">I have read this and I agree</button></section>`;
   if(hold) html+=`<div class="notice bad"><b>Your account is on hold.</b> Your oldest unpaid delivery is ${c.maxLate} days late. Please pay the overdue amount so the store can release new products to you.</div>`;
   else if(c.overdue) html+=`<div class="notice warn"><b>${P(c.overdue)} is past due.</b> Please pay soon to keep your account in good standing.</div>`;
   if(s.paymentInfo) html+=`<section class="card"><div class="pay"><div><h3 style="font-size:16px">How to pay</h3><p>${esc(s.paymentInfo)}</p></div><button class="btn sm" id="copyPay" type="button">Copy</button></div>${s.phone?`<p class="small muted" style="margin:8px 0 0">Questions? Contact ${esc(s.storeName||"the store")}: ${esc(s.phone)}</p>`:""}</section>`;
@@ -272,6 +273,7 @@ document.addEventListener("click",e=>{
   if(e.target.closest("#ov")) return;
   const qb=e.target.closest("[data-q]"); if(qb){ bump(qb.dataset.p,+qb.dataset.q); render(); return; }
   if(e.target.id==="cb-go"){ reviewOrder(); return; }
+  if(e.target.id==="consentBtn"){ e.target.disabled=true; api("POST","/api/portal/consent",{}).then(()=>{ toast("Thank you"); load(); },()=>{ e.target.disabled=false; toast("Couldn't save. Try again."); }); return; }
   if(e.target.id==="copyPay"){ const txt=S.settings.paymentInfo||""; try{ navigator.clipboard.writeText(txt).then(()=>toast("Copied"),()=>toast("Select the text to copy it")); }catch(_){ toast("Select the text to copy it"); } }
 });
 document.addEventListener("input",e=>{ if(e.target.id==="q"){ S.q=e.target.value; render(); } });

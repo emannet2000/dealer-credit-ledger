@@ -400,6 +400,9 @@ const lsGet=k=>{ try{ return localStorage.getItem("dcl:"+k); }catch(e){ return n
 const lsSet=(k,v)=>{ try{ localStorage.setItem("dcl:"+k,String(v)); }catch(e){} };
 const canEditTx=t=>S.canAdmin||(S.canWrite&&!!S.me&&t.createdBy===S.me&&t.createdAt>1e9&&ymd(new Date(t.createdAt))===today());
 const DEFAULT_MSG="Hi {name}, magandang araw po! Paalala lang po mula sa {store}: ang balance ninyo ay {balance}, {status}. {payinfo}Salamat po!";
+// Starting text for the privacy notice (FR-078). The owner should adapt it with their adviser.
+const DEFAULT_PRIVACY="We collect your name, mobile number, address and the record of your purchases and payments so we can sell to you on credit, collect payments and keep our books. Only our staff can see it. We keep your records for as long as the law requires, then remove your personal details. You can ask us for a copy of your data, or to correct or remove it, by contacting the store. We follow the Data Privacy Act of 2012 (RA 10173).";
+const CONSENT_L={"signed form":"Signed form","verbal":"Told us verbally","portal":"Accepted in the dealer portal"};
 function reminderText(id){
   const d=S.dealers.get(id), st=status(id), s=S.settings;
   const line=st.overdue>0?`at ${P(st.overdue)} na po ang lampas sa due date`:st.nextDue?`due po sa ${fmtDate(st.nextDue)}`:"";
@@ -756,6 +759,10 @@ function vStore(){
       <label class="f">Approval requests expire after (hours)<input id="st-apph" type="number" min="1" max="336" step="1" value="${esc(s.approvalHours??24)}" ${S.canAdmin?"":"disabled"}><span class="hint">Staff can send blocked credit sales to you for approval.</span></label>
       <label class="chk span"><input type="checkbox" id="st-block" ${s.blockOverLimit!==false?"checked":""} ${S.canAdmin?"":"disabled"}> Block credit sales over the limit unless the owner approves</label>
       <label class="chk span"><input type="checkbox" id="st-neg" ${s.allowNegativeStock?"checked":""} ${S.canAdmin?"":"disabled"}> Allow stock to go below zero (backorders)</label>
+      <h3 class="span form-sec">Privacy (Data Privacy Act)</h3>
+      <label class="f span">Privacy notice for dealers<textarea id="st-privacy" rows="5" ${S.canAdmin?"":"disabled"}>${esc(s.privacyNotice??DEFAULT_PRIVACY)}</textarea><span class="hint">Shown in the dealer portal for dealers to accept. ${s.privacyVersion?`Current version: ${esc(s.privacyVersion)}. Changing the text creates a new version.`:"Not saved yet."} Adapt it with your adviser.</span></label>
+      <label class="f">Keep records for (years)<input id="st-ret" type="number" min="1" max="30" step="1" value="${esc(s.retentionYears??10)}" ${S.canAdmin?"":"disabled"}><span class="hint">Personal data of dealers with transactions in this period can't be removed. Check the period with your accountant.</span></label>
+      <h3 class="span form-sec">Messages</h3>
       <label class="f span">Collection reminder message<textarea id="st-msg" rows="4" ${S.canAdmin?"":"disabled"}>${esc(s.reminderTemplate||DEFAULT_MSG)}</textarea><span class="hint">{name}, {balance}, {status}, {store} and {payinfo} are filled in for each dealer.</span></label>
       ${S.canAdmin?`<div class="actions span"><button class="btn primary" type="submit">Save store details</button></div>`:`<p class="small muted span" style="margin:0">Only the ledger owner or editors can change store details.</p>`}
     </form>
@@ -1332,7 +1339,9 @@ function crmPanel(id){
       ${d.source||d.referredBy?`<dt>Source</dt><dd>${esc([d.source,d.referredBy&&"referred by "+d.referredBy].filter(Boolean).join(" · "))}</dd>`:""}
       ${(d.tags||[]).length?`<dt>Tags</dt><dd>${d.tags.map(t=>`<span class="pill neutral">${esc(t)}</span>`).join(" ")}</dd>`:""}
       <dt>Last contact</dt><dd>${c.last?fmtDate(c.last):"Never"}</dd>
+      <dt>Privacy consent</dt><dd>${d.consent?`${esc(CONSENT_L[d.consent.method]||d.consent.method)} · ${fmtStamp(d.consent.at)}${d.consent.noticeVersion&&S.settings.privacyVersion&&d.consent.noticeVersion!==S.settings.privacyVersion?` <span class="pill warn">older notice</span>`:""}`:`<span class="pill warn">Not recorded</span>`}</dd>
     </dl>
+    ${window.APP&&S.acct&&S.acct.role==="owner"?`<div class="actions" style="margin-top:8px"><button class="btn sm" data-act="pd-export" data-id="${id}" type="button">Export personal data</button><button class="btn sm danger" data-act="pd-remove" data-id="${id}" type="button">Remove personal data…</button></div>`:""}
     ${c.log.length?`<ul class="crm-log">${c.log.slice(0,30).map(([k,x])=>{ const fu=x.followUp; const due=fu&&!x.followUpDone; return `<li>
       <div class="crm-meta"><span class="pill neutral">${KIND_L[x.kind]||esc(x.kind)}</span> <b>${fmtDate(x.date)}</b> <span class="small muted">· ${esc(nameOf(x.createdBy))}</span></div>
       ${x.outcome?`<div><b>${esc(x.outcome)}</b></div>`:""}${x.note?`<div class="small" style="white-space:pre-wrap">${esc(x.note)}</div>`:""}
@@ -1399,6 +1408,9 @@ function dealerForm(id,preStage){
     <label class="f">Source<select id="d-src"><option value="">—</option>${SOURCES.map(s=>`<option ${s===d.source?"selected":""}>${s}</option>`).join("")}</select></label>
     <label class="f">Referred by<input id="d-ref" value="${esc(d.referredBy||"")}" placeholder="Name of the person who referred them"></label>
     <label class="f">Tags<input id="d-tags" value="${esc((d.tags||[]).join(", "))}" placeholder="e.g. VIP, Weekend seller" list="d-taglist"><datalist id="d-taglist">${allTags().map(t=>`<option value="${esc(t)}">`).join("")}</datalist><span class="hint">Separate tags with commas.</span></label>
+    <h3 class="span form-sec">Privacy consent</h3>
+    <label class="f">Consent to use their personal data<select id="d-consent"><option value="">Not recorded</option>${["signed form","verbal"].map(m=>`<option value="${m}" ${d.consent&&d.consent.method===m?"selected":""}>${CONSENT_L[m]}</option>`).join("")}${d.consent&&d.consent.method==="portal"?`<option value="portal" selected>${CONSENT_L.portal}</option>`:""}</select>
+      <span class="hint">${d.consent?`Recorded ${fmtStamp(d.consent.at)}${d.consent.noticeVersion?` for notice ${esc(d.consent.noticeVersion)}`:""}.`:"Record how the dealer agreed to the privacy notice in Store → Privacy."}</span></label>
     <h3 class="span form-sec">Credit terms</h3>
     <label class="f">Credit limit (₱)<input id="d-limit" type="number" min="0" step="0.01" value="${esc(d.creditLimit??"")}" placeholder="Blank = no limit" ${S.canAdmin?"":"disabled"}><span class="hint">${S.canAdmin?"Recommended. Sales over the limit need owner approval.":"Only the owner or an editor can set credit limits."}</span></label>
     <label class="f">Payment terms (days)<input id="d-terms" type="number" min="0" step="1" value="${esc(d.terms??30)}" ${S.canAdmin?"":"disabled"}></label>
@@ -1420,6 +1432,7 @@ function dealerForm(id,preStage){
       const lim=$("#d-limit").value.trim();
       const base=id?{...S.dealers.get(id)}:{createdAt:Date.now(),createdBy:S.me,active:true};
       const data={...base,name,phone,email,messenger:$("#d-msgr").value.trim(),birthday:$("#d-bday").value||null,area:$("#d-area").value.trim(),address:$("#d-addr").value.trim(),
+        consent:(()=>{ const m=$("#d-consent").value; return !m?null:base.consent&&base.consent.method===m?base.consent:{method:m}; })(),
         stage:$("#d-stage").value,source:$("#d-src").value,referredBy:$("#d-ref").value.trim(),tags:$("#d-tags").value.split(",").map(t=>t.trim()).filter(Boolean),
         creditLimit:lim===""?null:r2(lim),terms:Math.max(0,Math.round(Number($("#d-terms").value)||0)),discountPct:$("#d-pct").value===""?null:Math.min(100,Math.max(0,Number($("#d-pct").value))),notes:$("#d-notes").value.trim(),updated:stamp()};
       const prevLim=id?(S.dealers.get(id).creditLimit??null):undefined;
@@ -1589,6 +1602,7 @@ function creditHistoryPanel(id){
   </section>`;
 }
 function dealerSheet(id){
+  if(window.APP&&window.APP.viewedDealer) window.APP.viewedDealer(id);
   show(()=>{ const d=S.dealers.get(id); if(!d) return [head("Dealer not found")+`<p>This dealer was removed.</p>`];
   const st=status(id); let run=0; const fresh=isProspect(d)&&!dealerTxns(id,true).length;
   const all=dealerTxns(id,true).map(([tid,t])=>{ if(isLive(t)) run=r2(run+txnEffect(t)); return {tid,t,run}; }).reverse();
@@ -2095,7 +2109,7 @@ function teamPanel(){
   ${S.canAdmin?`<section class="panel"><div class="panel-head"><h2>Activity log</h2><button class="btn sm" data-act="load-audit" type="button">${S.audit?"Refresh":"Show recent activity"}</button></div>${S.audit?auditTable():`<p class="small muted" style="margin:0">Every sign-in, change and deletion is recorded with who did it and when.</p>`}</section>`:""}`;
 }
 function auditTable(){
-  const lbl={create:"Added",update:"Changed",delete:"Deleted",restore:"Restored",stock:"Stock changed",login:"Signed in",upload:"Photo added",setup:"Created the ledger",password_change:"Changed password",user_create:"Added account",user_update:"Changed account","2fa_enabled":"Turned on two-step sign-in","2fa_disabled":"Turned off two-step sign-in","2fa_recovery_used":"Used a recovery code",signout_others:"Signed out other devices",signout_everywhere:"Signed someone out everywhere",backup_run:"Ran a backup",asset_cleanup:"Removed unused pictures",approval_request:"Asked for approval",approval_approve:"Approved a sale",approval_reject:"Rejected a request",approval_withdraw:"Withdrew a request"};
+  const lbl={create:"Added",update:"Changed",delete:"Deleted",restore:"Restored",stock:"Stock changed",login:"Signed in",upload:"Photo added",setup:"Created the ledger",password_change:"Changed password",user_create:"Added account",user_update:"Changed account","2fa_enabled":"Turned on two-step sign-in","2fa_disabled":"Turned off two-step sign-in","2fa_recovery_used":"Used a recovery code",signout_others:"Signed out other devices",signout_everywhere:"Signed someone out everywhere",backup_run:"Ran a backup",asset_cleanup:"Removed unused pictures",approval_request:"Asked for approval",approval_approve:"Approved a sale",approval_reject:"Rejected a request",approval_withdraw:"Withdrew a request",view_profile:"Opened a dealer profile",personal_data_export:"Exported personal data",personal_data_anonymise:"Removed personal data",consent_given:"Accepted the privacy notice"};
   const what=a=>{ let d={}; try{ d=JSON.parse(a.detail||"{}")||{}; }catch(e){}
     if(a.collection==="txns") return `${esc(d.no||"")} ${esc(TYPE_LABEL[d.type]||"")} ${d.amount?P(d.amount):""}${d.voided?" (voided)":""}`;
     if(a.collection==="dealers"||a.collection==="products") return esc(d.name||"");
@@ -2192,7 +2206,9 @@ document.addEventListener("click",e=>{
        "go-orders":()=>goView("orders"),
        "catalog":()=>catalogSheet(),
        "pay-amt":()=>paymentForm(id,null,{amount:Number(a.dataset.amt).toFixed(2),deliveryId:a.dataset.did||null}),
-       "new-user":()=>userForm(), "portal-for":()=>{ const ex=(S.team||[]).find(u=>u.role==="dealer"&&u.dealerId===id); userForm(ex?ex.id:null,ex?null:id); }, "edit-user":()=>userForm(id), "change-pw":()=>passwordForm(), "2fa-setup":()=>twoStepSheet(), "2fa-off":()=>twoStepOffSheet(), "signout-others":()=>guarded(a,async()=>{ await window.APP.signoutOthers(); toast("Your other devices were signed out"); a.disabled=false; }), "logout":()=>guarded(a,async()=>{ try{ await window.APP.logout(!!a.dataset.armed); }catch(e){ if(e&&e.code==="unsent"){ a.disabled=false; armed(a,"Tap again to discard and sign out"); toast(e.userMsg,"error"); return; } throw e; } }), "held-review":()=>heldSheet(), "approvals":()=>approvalsSheet(),
+       "new-user":()=>userForm(), "portal-for":()=>{ const ex=(S.team||[]).find(u=>u.role==="dealer"&&u.dealerId===id); userForm(ex?ex.id:null,ex?null:id); }, "edit-user":()=>userForm(id), "change-pw":()=>passwordForm(), "2fa-setup":()=>twoStepSheet(), "2fa-off":()=>twoStepOffSheet(), "signout-others":()=>guarded(a,async()=>{ await window.APP.signoutOthers(); toast("Your other devices were signed out"); a.disabled=false; }), "logout":()=>guarded(a,async()=>{ try{ await window.APP.logout(!!a.dataset.armed); }catch(e){ if(e&&e.code==="unsent"){ a.disabled=false; armed(a,"Tap again to discard and sign out"); toast(e.userMsg,"error"); return; } throw e; } }), "held-review":()=>heldSheet(),
+       "pd-export":()=>guarded(a,async()=>{ const data=await window.APP.exportDealer(id); await save(`personal-data-${(S.dealers.get(id)||{}).name||id}.json`.replace(/[^\w.-]+/g,"_"),JSON.stringify(data,null,1)); a.disabled=false; }),
+       "pd-remove":()=>{ if(!armed(a,"Tap again: remove name, phone, address and notes")) return; guarded(a,async()=>{ await window.APP.anonymiseDealer(id); toast("Personal data removed. Financial records were kept."); closeAll(); }); }, "approvals":()=>approvalsSheet(),
        "load-audit":()=>guarded(a,async()=>{ S.audit=await window.APP.audit(150); render(); }),
        "go-store":()=>goView("store"), "backup-run":()=>guarded(a,async()=>{ a.textContent="Backing up…"; try{ S.backup=await window.APP.backupRun(); toast("Backup made and verified"); }catch(e){ if(e&&e.status===500) await loadBackupStatus(); throw e; } render(); }),
        "go-dealers":()=>goView("dealers"), "go-collect":()=>goView("collect"), "count":()=>countSheet(),
@@ -2233,7 +2249,7 @@ document.addEventListener("change",e=>{
 });
 document.addEventListener("submit",e=>{
   if(e.target.id!=="storeForm") return; e.preventDefault(); const btn=e.submitter||$("button[type=submit]",e.target);
-  const data={storeName:$("#st-name").value.trim(),phone:$("#st-phone").value.trim(),address:$("#st-addr").value.trim(),paymentInfo:$("#st-pay").value.trim(),defaultTerms:Math.max(0,Math.round(Number($("#st-terms").value)||0)),footer:$("#st-foot").value.trim(),defaultLimit:$("#st-limit").value===""?null:r2($("#st-limit").value),holdDays:Math.max(1,Math.round(Number($("#st-hold").value)||60)),approvalHours:Math.min(336,Math.max(1,Math.round(Number($("#st-apph").value)||24))),blockOverLimit:$("#st-block").checked,allowNegativeStock:$("#st-neg").checked,reminderTemplate:$("#st-msg").value.trim(),discountPct:Math.min(100,Math.max(0,Number($("#st-pct").value)||0)),updated:stamp()};
+  const data={storeName:$("#st-name").value.trim(),phone:$("#st-phone").value.trim(),address:$("#st-addr").value.trim(),paymentInfo:$("#st-pay").value.trim(),defaultTerms:Math.max(0,Math.round(Number($("#st-terms").value)||0)),footer:$("#st-foot").value.trim(),defaultLimit:$("#st-limit").value===""?null:r2($("#st-limit").value),holdDays:Math.max(1,Math.round(Number($("#st-hold").value)||60)),approvalHours:Math.min(336,Math.max(1,Math.round(Number($("#st-apph").value)||24))),blockOverLimit:$("#st-block").checked,allowNegativeStock:$("#st-neg").checked,reminderTemplate:$("#st-msg").value.trim(),privacyNotice:$("#st-privacy").value.trim(),retentionYears:Math.min(30,Math.max(1,Math.round(Number($("#st-ret").value)||10))),discountPct:Math.min(100,Math.max(0,Number($("#st-pct").value)||0)),updated:stamp()};
   guarded(btn,async()=>{ await db.doc("settings/store").set(data); toast("Store details saved"); btn.disabled=false; });
 });
 const VIEWS=["overview","orders","collect","dealers","products","activity","reports","store"];
