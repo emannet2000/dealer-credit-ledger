@@ -177,6 +177,16 @@ Measured on 3 November 2026 with 1,000 dealers, 300 products and 50,000 transact
 
 Lists show the most important 100 rows first, with a button to show more.
 
+## Development and tests
+
+| Command | What it runs |
+|---|---|
+| `npm test` | API tests and tests of the browser's business logic (settlement, aging, statements, payment allocation), including a check that browser and server settle every ledger the same way |
+| `CHROME_PATH=/path/to/chrome npm run test:e2e` | Browser tests in headless Chrome: credit sale, payment, offline payment, approval request (skipped without `CHROME_PATH`) |
+| `npm run test:all` | Both |
+
+GitHub Actions (`.github/workflows/ci.yml`) runs the dependency audit, `npm test` and the browser tests on Node 20 and 22 for every push and pull request. To make failures block merging, turn on branch protection for `main` in the repository settings and require the **CI** checks.
+
 ## Move your data from the claude.ai version
 
 1. In the claude.ai ledger, open **Store → Download backup**.

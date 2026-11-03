@@ -10,7 +10,9 @@
     "test": "node --test test/*.test.js",
     "import": "node scripts/import-backup.js",
     "reset-password": "node scripts/reset-password.js",
-    "restore": "node scripts/restore-db.js"
+    "restore": "node scripts/restore-db.js",
+    "test:e2e": "node --test --test-concurrency=1 test/e2e/*.e2e.js",
+    "test:all": "npm test && npm run test:e2e"
   },
   "engines": {
     "node": ">=20"
