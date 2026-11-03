@@ -34,9 +34,9 @@ This document defines the target functional requirements for the Dealer Credit L
 | Platform and integrations | FR-068 – FR-070 | 3 | 0 | 1 | 2 |
 | Collections and controls | FR-071 – FR-074 | 4 | 0 | 0 | 4 |
 | Dealer relationships (CRM) | FR-075 | 1 | 1 | 0 | 0 |
-| Field collections, privacy and growth | FR-076 – FR-082 | 7 | 1 | 0 | 6 |
+| Field collections, privacy and growth | FR-076 – FR-082 | 7 | 1 | 1 | 5 |
 | Catalog media, approvals and field use | FR-083 – FR-087 | 5 | 4 | 0 | 1 |
-| **Total** | | **87** | **59** | **2** | **26** |
+| **Total** | | **87** | **59** | **3** | **25** |
 
 ### P0 items delivered in this release
 
@@ -1044,7 +1044,7 @@ This document defines the target functional requirements for the Dealer Credit L
 ### FR-082 — Sales targets
 
 - **Priority:** P2
-- **Status:** Planned
+- **Status:** Partial
 - **User story:** As the owner, I want to set monthly sales and collection targets for dealers and areas so I can track progress and spot dealers who have gone quiet.
 - **Acceptance criteria:**
   - Monthly targets for net sales and collections can be set per dealer, per area or store-wide, and copied from one month to the next.
@@ -1052,6 +1052,7 @@ This document defines the target functional requirements for the Dealer Credit L
   - The overview lists dealers below a set percentage of target near month-end.
   - Dealers who have not ordered within a set number of days (default 60) are flagged as inactive and can be filtered.
   - Target history is kept so past months can be compared.
+  - **Gap:** store-wide monthly targets, progress on the Dashboard tab and the 60-day inactive-dealer list are built; per-dealer and per-area targets are not.
 
 ---
 
