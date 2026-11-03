@@ -74,7 +74,9 @@ Open http://localhost:3000. The first visit asks you to create the **owner** acc
 | `ALLOW_INSECURE_HTTP` | — | Set to `true` only to try the production build on a local network without HTTPS. Never on a public server. |
 | `TZ` | `Asia/Manila` | Time zone for "today", due dates and staff edit limits |
 | `BACKUP_KEEP` | `30` | Number of daily backups to keep |
-| `BACKUP_SYNC_CMD` | — | Optional command run after each daily backup. The finished file is passed in `BACKUP_FILE`, e.g. `rclone copy "$BACKUP_FILE" remote:ledger-backups` |
+| `BACKUP_SYNC_CMD` | — | Command run after each daily backup to copy it offsite. The finished file is passed in `BACKUP_FILE`, e.g. `rclone copy "$BACKUP_FILE" remote:ledger-backups`. **Set this before going live.** |
+| `ALERT_WEBHOOK_URL` | — | Gets a JSON `{"text": "..."}` POST when a backup or offsite copy fails (works with Slack, Google Chat and Discord-style webhooks) |
+| `ALERT_CMD` | — | Command run when a backup or offsite copy fails; the message is in `ALERT_MESSAGE`, e.g. a script that sends an SMS or email |
 
 ## Put it online
 
@@ -127,6 +129,27 @@ The app must be served over HTTPS before real dealers and money go into it. Pass
 4. Restart the app and open `https://ledger.example.com`. Check that `http://` redirects to `https://`.
 
 With `COOKIE_SECURE=true` the app also redirects any plain-HTTP request it receives to HTTPS and sends `Strict-Transport-Security`. Every page is served with a Content-Security-Policy that allows only the app's own scripts and Google Fonts. The app trusts one proxy in front of it for `X-Forwarded-Proto`; don't expose port 3000 directly.
+
+## Backups
+
+The server makes a backup every day in `DATA_DIR/backups/ledger-YYYY-MM-DD.db` and keeps the last `BACKUP_KEEP` days. Each backup is opened and checked with SQLite's integrity check right after it is made. **Store → Server backups** shows the last good backup, whether the offsite copy worked, and a **Back up and verify now** button. Owners and editors also see a warning on the Overview when the last good backup is more than 7 days old, a backup or offsite copy failed, or no offsite copy is set up. Set `ALERT_WEBHOOK_URL` or `ALERT_CMD` to be told about failures right away.
+
+Keep at least one copy off the server with `BACKUP_SYNC_CMD` (for example with [rclone](https://rclone.org) to Google Drive or S3).
+
+### Restoring from a backup
+
+1. Stop the app (`npx pm2 stop ledger` or `docker stop ledger`).
+2. Run the restore with the backup you want. It checks the file first, then saves the current database as `ledger.before-restore-<time>.db`:
+
+   ```bash
+   npm run restore -- data/backups/ledger-2026-11-03.db
+   ```
+
+   With Docker: `docker run --rm -v ledger-data:/data dealer-ledger npm run restore -- /data/backups/ledger-2026-11-03.db`
+
+3. Start the app again and sign in. Photos are not inside the daily backup; they stay in `DATA_DIR/uploads`. Use **Download full backup** in the Store tab for a copy that includes photos and accounts.
+
+Tested on 3 November 2026 with 1,000 dealers and 50,000 transactions (14 MB): making and verifying the backup took 0.2 s and the restore took 0.3 s. To repeat the test: `DATA_DIR=/tmp/ledger-perf node test/perf/seed.js`, then back up and restore that folder.
 
 ## Move your data from the claude.ai version
 

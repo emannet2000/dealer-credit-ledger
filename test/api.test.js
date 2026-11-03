@@ -670,3 +670,39 @@ test("pictures never saved on a record are cleaned up after a day (PR-11)", asyn
   assert.equal((await owner("GET", "/_blob/" + fresh)).status, 200, "recent uploads are kept");
   assert.ok(JSON.stringify((await owner("GET", "/api/audit")).data).includes("asset_cleanup"));
 });
+
+test("backups are verified, failures alert, and a backup restores (PR-08)", async () => {
+  const alertFile = path.join(dir, "alert.txt");
+  process.env.BACKUP_SYNC_CMD = "echo offsite down >&2; exit 3";
+  process.env.ALERT_CMD = `printf '%s' "$ALERT_MESSAGE" > "${alertFile}"`;
+  let file;
+  try { file = await backupNow(); } finally { delete process.env.BACKUP_SYNC_CMD; delete process.env.ALERT_CMD; }
+  for (let i = 0; i < 40 && !fs.existsSync(alertFile); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.match(fs.readFileSync(alertFile, "utf8"), /Offsite backup copy failed: offsite down/);
+  assert.equal((await staff("GET", "/api/backup/status")).status, 403);
+  let st = (await owner("GET", "/api/backup/status")).data;
+  assert.ok(st.lastSuccessAt > Date.now() - 60000);
+  assert.ok(st.lastDocs > 0 && st.lastUsers > 0);
+  assert.equal(st.offsite.lastError, "offsite down", "the failed offsite copy is shown");
+  const run = await owner("POST", "/api/backup/run");
+  assert.equal(run.status, 200);
+  assert.equal(run.data.lastFile, path.basename(file));
+  assert.equal(run.data.offsite, null, "no offsite command set now");
+
+  // Restore the backup into a fresh data folder with the restore script.
+  const { spawnSync } = require("child_process");
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), "ledger-restore-"));
+  const script = path.join(__dirname, "..", "scripts", "restore-db.js");
+  const ok = spawnSync(process.execPath, [script, file], { env: { ...process.env, DATA_DIR: target }, encoding: "utf8" });
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, /Restored .* records/);
+  const restored = new Database(path.join(target, "ledger.db"), { readonly: true });
+  assert.equal(restored.prepare("SELECT COUNT(*) n FROM docs").get().n, st.lastDocs);
+  restored.close();
+  // A damaged file is refused and the live database is left alone.
+  const bad = path.join(target, "broken.db"); fs.writeFileSync(bad, "not a database");
+  const no = spawnSync(process.execPath, [script, bad], { env: { ...process.env, DATA_DIR: target }, encoding: "utf8" });
+  assert.equal(no.status, 1);
+  assert.ok(fs.readdirSync(target).filter((f) => f.startsWith("ledger.before-restore")).length === 0, "nothing replaced");
+  fs.rmSync(target, { recursive: true, force: true });
+});

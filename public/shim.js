@@ -246,6 +246,8 @@
     changePassword: (current, next) => api("POST", "/api/me/password", { current, next }),
     audit: (limit = 150) => api("GET", "/api/audit?limit=" + limit),
     backupFull: () => api("GET", "/api/backup/full"),
+    backupStatus: () => api("GET", "/api/backup/status"),
+    backupRun: () => api("POST", "/api/backup/run", {}),
     backupRestore: (backup, replace = false) => api("POST", "/api/backup/restore", { backup, replace }),
     // Offline state for the page: { online, pending, held: [{id, data, error}], lastSync, syncing }
     offline: () => ({ online: off.online, pending: off.queue.length, held: off.held.map((h) => ({ id: h.id, data: h.data, error: h.error, heldAt: h.heldAt })), lastSync: off.lastSync, syncing: off.syncing }),

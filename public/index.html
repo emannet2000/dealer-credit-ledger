@@ -762,6 +762,13 @@ function vStore(){
   </section>
   <div class="col">
     ${teamPanel()}
+    ${S.backup?(()=>{ const b=S.backup, bp=backupProblems(); return `<section class="panel"><div class="panel-head"><h2>Server backups</h2><button class="btn sm" data-act="backup-run" type="button">Back up and verify now</button></div>
+      ${bp.length?bp.map(([k,t])=>`<div class="notice ${k}"><p>${esc(t)}</p></div>`).join(""):`<div class="notice info"><p>Backups are running, verified and copied offsite.</p></div>`}
+      <dl class="kv"><dt>Last good backup</dt><dd>${b.lastSuccessAt?`${esc(fmtStamp(b.lastSuccessAt))} · ${esc(b.lastFile||"")} · ${(b.lastSize/1048576).toFixed(1)} MB · ${b.lastDocs} records, ${b.lastUsers} accounts · integrity check passed`:"None yet"}</dd>
+        <dt>Offsite copy</dt><dd>${!b.offsiteConfigured?"Not set up":b.offsite&&b.offsite.lastSuccessAt?`Last copied ${esc(fmtStamp(b.offsite.lastSuccessAt))}`:"Not copied yet"}</dd>
+        <dt>Alerts</dt><dd>${b.alertsConfigured?"On (ALERT_CMD or ALERT_WEBHOOK_URL)":"Off. Set ALERT_WEBHOOK_URL or ALERT_CMD to be told when a backup fails."}</dd>
+        <dt>Kept on server</dt><dd>${b.count} daily backup${b.count===1?"":"s"}</dd></dl>
+      <p class="small muted" style="margin:0">To restore one, stop the app and run <code>npm run restore -- data/backups/${esc(b.lastFile||"ledger-YYYY-MM-DD.db")}</code>. See README, “Restoring from a backup”.</p></section>`; })():""}
     <section class="panel"><h2>Backup and restore</h2>
       <p class="small" style="margin-top:0">Download a backup regularly and keep it on your phone, computer or Google Drive. Photos are not inside the backup file. The server also saves an automatic backup of everything (photos excluded) every day.</p>
       <div class="actions">${downloads?`<button class="btn primary" data-act="backup" type="button">Download backup</button>`:`<span class="small muted">Downloads aren't available in this view.</span>`}
@@ -881,7 +888,8 @@ function healthNotices(){
   if(nolim&&S.canWrite) out.push(`<div class="notice warn"><p><b>${nolim} dealer${nolim===1?" has":"s have"} no credit limit.</b> Set one for every dealer, even a high one, so the app can stop risky releases.</p><button class="btn sm" data-act="go-dealers" type="button">Review dealers</button></div>`);
   if(S.products.size&&S.canWrite){ const last=[...S.moves.values()].filter(m=>m.reason==="Stock count").map(m=>m.date).sort().pop();
     if(!last||daysBetween(last,today())>30) out.push(`<div class="notice warn"><p><b>Monthly stock count ${last?"is due":"not done yet"}.</b> ${last?`Last count was ${fmtDate(last)}.`:"Count your stock once a month to catch missing items."}</p><button class="btn sm" data-act="count" type="button">Start stock count</button></div>`); }
-  if(downloads&&real){ const lb=Number(lsGet("lastBackup"))||0; const days=lb?Math.floor((Date.now()-lb)/864e5):null;
+  { const bp=backupProblems(); if(bp.length) out.push(`<div class="notice ${bp.some(p=>p[0]==="bad")?"bad":"warn"}"><p><b>Backups need attention.</b> ${bp.map(p=>esc(p[1])).join(" ")}</p><button class="btn sm" data-act="go-store" type="button">Backup status</button></div>`); }
+  if(downloads&&real&&!window.APP){ const lb=Number(lsGet("lastBackup"))||0; const days=lb?Math.floor((Date.now()-lb)/864e5):null;
     if(days===null||days>=7) out.push(`<div class="notice warn"><p><b>${days===null?"No backup downloaded on this device yet.":`Last backup was ${days} days ago.`}</b> Download one every week.</p><button class="btn sm" data-act="backup" type="button">Download backup</button></div>`); }
   return out.join("");
 }
@@ -2059,7 +2067,17 @@ function restoreFlow(file){
 
 /* ================= team accounts (Node.js server) ================= */
 const ROLE_L={owner:"Owner",editor:"Editor",staff:"Staff",viewer:"Viewer",dealer:"Dealer portal"};
-async function loadTeam(){ try{ S.acct=await window.APP.me(); S.team=await window.APP.users(); $("#acct").textContent=`${S.acct.name} · ${ROLE_L[S.acct.role]}`; render(); }catch(e){} }
+async function loadTeam(){ try{ S.acct=await window.APP.me(); S.team=await window.APP.users(); $("#acct").textContent=`${S.acct.name} · ${ROLE_L[S.acct.role]}`; render(); loadBackupStatus(); }catch(e){} }
+// Server backup health for owners and editors (FR-067, PR-08).
+async function loadBackupStatus(){ if(!window.APP||!window.APP.backupStatus||!S.acct||!["owner","editor"].includes(S.acct.role)) return; try{ S.backup=await window.APP.backupStatus(); render(); }catch(e){} }
+setInterval(loadBackupStatus,3600e3);
+function backupProblems(){ const b=S.backup; if(!b) return []; const out=[], now=Date.now();
+  if(!b.lastSuccessAt) out.push(["bad","No server backup has been made yet."]);
+  else if(now-b.lastSuccessAt>7*864e5) out.push(["bad",`The last good server backup was ${Math.floor((now-b.lastSuccessAt)/864e5)} days ago.`]);
+  if(b.lastErrorAt&&(!b.lastSuccessAt||b.lastErrorAt>b.lastSuccessAt)) out.push(["bad",`The last backup failed: ${b.lastError}`]);
+  if(!b.offsiteConfigured) out.push(["warn","Backups are kept only on this server. Set BACKUP_SYNC_CMD so a copy goes offsite."]);
+  else if(b.offsite&&b.offsite.lastErrorAt&&(!b.offsite.lastSuccessAt||b.offsite.lastErrorAt>b.offsite.lastSuccessAt)) out.push(["bad",`The offsite backup copy failed: ${b.offsite.lastError}`]);
+  return out; }
 function teamPanel(){
   const me=S.acct||{}, owner=me.role==="owner", list=S.team||[];
   return `<section class="panel"><div class="panel-head"><h2>Team accounts</h2>${owner?`<button class="btn sm primary" data-act="new-user" type="button">+ Add person</button>`:""}</div>
@@ -2143,6 +2161,7 @@ document.addEventListener("click",e=>{
        "pay-amt":()=>paymentForm(id,null,{amount:Number(a.dataset.amt).toFixed(2),deliveryId:a.dataset.did||null}),
        "new-user":()=>userForm(), "portal-for":()=>{ const ex=(S.team||[]).find(u=>u.role==="dealer"&&u.dealerId===id); userForm(ex?ex.id:null,ex?null:id); }, "edit-user":()=>userForm(id), "change-pw":()=>passwordForm(), "logout":()=>guarded(a,async()=>{ try{ await window.APP.logout(!!a.dataset.armed); }catch(e){ if(e&&e.code==="unsent"){ a.disabled=false; armed(a,"Tap again to discard and sign out"); toast(e.userMsg,"error"); return; } throw e; } }), "held-review":()=>heldSheet(), "approvals":()=>approvalsSheet(),
        "load-audit":()=>guarded(a,async()=>{ S.audit=await window.APP.audit(150); render(); }),
+       "go-store":()=>goView("store"), "backup-run":()=>guarded(a,async()=>{ a.textContent="Backing up…"; try{ S.backup=await window.APP.backupRun(); toast("Backup made and verified"); }catch(e){ if(e&&e.status===500) await loadBackupStatus(); throw e; } render(); }),
        "go-dealers":()=>goView("dealers"), "go-collect":()=>goView("collect"), "count":()=>countSheet(),
        "opening-for":()=>openingForm(id), "new-opening":()=>openingForm(),
        "remind-copy":()=>copyText(reminderText(id),"Reminder message"),
