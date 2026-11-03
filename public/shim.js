@@ -77,15 +77,16 @@
     if (s.loading) { s.again = true; return s.loading; }
     s.loading = (async () => {
       await off.ready;
+      // PR-09: on first open, show the copy saved on this device right away, then update it.
+      if (!s.loaded && OFFLINE_COLS.has(c)) {
+        const hit = await kv.get("col:" + c);
+        if (hit && hit.rows) { s.docs = new Map(hit.rows.map((r) => [r.id, Object.freeze(r.data)])); s.loaded = true; s.cached = true; if (c === "txns") mergePending(s); emit(c); }
+      }
       try {
         const rows = await api("GET", "/api/c/" + c);
         s.docs = new Map(rows.map((r) => [r.id, Object.freeze(r.data)]));
         s.loaded = true; s.error = null; s.cached = false;
-        if (OFFLINE_COLS.has(c)) {
-          const at = Date.now();
-          kv.set("col:" + c, { at, rows: rows.map((r) => ({ id: r.id, data: lean(c, r.data) })) });
-          if (c === "txns") { off.lastSync = at; kv.set("lastSync", at); announce(); }
-        }
+        saveLater(c);
       } catch (e) {
         if (e && e.code === "offline") {
           const hit = OFFLINE_COLS.has(c) ? await kv.get("col:" + c) : null;
@@ -99,6 +100,35 @@
       if (s.again) { s.again = false; return refresh(c); }
     })();
     return s.loading;
+  }
+
+  // PR-09: fetch only the records a change event names, instead of the whole collection.
+  async function patch(c, ids) {
+    const s = col(c);
+    if (s.loading) { s.again = true; return; }
+    try {
+      const rows = await api("GET", `/api/c/${c}?ids=${ids.map(encodeURIComponent).join(",")}`);
+      const got = new Set(rows.map((r) => r.id));
+      for (const r of rows) s.docs.set(r.id, Object.freeze(r.data));
+      for (const id of ids) if (!got.has(id)) s.docs.delete(id);
+      if (c === "txns") mergePending(s);
+      saveLater(c);
+      emit(c);
+    } catch (e) { if (!(e && e.code === "offline")) refresh(c); }
+  }
+  // The device copy is rewritten at most every few seconds, not on every change.
+  // The first copy is written at once, so the app works offline right after it opens.
+  const saveTimers = {}, savedOnce = new Set();
+  function saveNow(c) {
+    const rows = [...col(c).docs].filter(([, d]) => !d.offlinePending).map(([id, d]) => ({ id, data: lean(c, d) }));
+    kv.set("col:" + c, { at: Date.now(), rows });
+    if (c === "txns") { off.lastSync = Date.now(); kv.set("lastSync", off.lastSync); announce(); }
+  }
+  function saveLater(c) {
+    if (!OFFLINE_COLS.has(c)) return;
+    if (!savedOnce.has(c)) { savedOnce.add(c); return saveNow(c); }
+    if (saveTimers[c]) return;
+    saveTimers[c] = setTimeout(() => { saveTimers[c] = null; saveNow(c); }, 3000);
   }
 
   // Sends queued offline payments, oldest first. Stops at the first network failure.
@@ -134,12 +164,12 @@
   function connectEvents() {
     if (es || typeof EventSource === "undefined") return;
     es = new EventSource("/api/events");
-    es.addEventListener("change", (ev) => { try { const { c } = JSON.parse(ev.data); if (cols.has(c)) refresh(c); } catch (e) {} });
+    es.addEventListener("change", (ev) => { try { const { c, ids } = JSON.parse(ev.data); if (!cols.has(c)) return; if (Array.isArray(ids) && ids.length && col(c).loaded) patch(c, ids); else refresh(c); } catch (e) {} });
     let first = true;
     es.addEventListener("open", () => { setOnline(true); flush(); if (!first) cols.forEach((s, c) => s.listeners.size && refresh(c)); first = false; });
   }
-  // Safety net in case live updates are blocked by a proxy.
-  setInterval(() => { if (document.visibilityState === "visible") cols.forEach((s, c) => s.listeners.size && refresh(c)); }, 60000);
+  // Safety net when live updates are blocked by a proxy (skipped while they work).
+  setInterval(() => { if (document.visibilityState === "visible" && !(es && es.readyState === 1)) cols.forEach((s, c) => s.listeners.size && refresh(c)); }, 60000);
 
   const newId = () => (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "").slice(0, 20) : Math.random().toString(36).slice(2) + Date.now().toString(36));
   function docRef(c, id) {

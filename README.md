@@ -162,6 +162,21 @@ Keep at least one copy off the server with `BACKUP_SYNC_CMD` (for example with [
 
 Tested on 3 November 2026 with 1,000 dealers and 50,000 transactions (14 MB): making and verifying the backup took 0.2 s and the restore took 0.3 s. To repeat the test: `DATA_DIR=/tmp/ledger-perf node test/perf/seed.js`, then back up and restore that folder.
 
+## Performance
+
+Measured on 3 November 2026 with 1,000 dealers, 300 products and 50,000 transactions (`test/perf/seed.js`, then `test/perf/measure.js` with `CHROME_PATH` set):
+
+| Action | Normal computer | CPU slowed 4× (budget phone) |
+|---|---:|---:|
+| Record a credit sale / payment (server) | 22 ms / 17 ms | — |
+| Switch tabs (Overview, Dealers, Collections, Transactions, Reports) | 0.06–0.23 s | 0.6–1.2 s |
+| Open a dealer | 0.3 s | 1.2 s |
+| Another device's change shows up | 0.1 s | 0.6 s |
+| Open the app, data already on the device | under 0.1 s | 0.2 s |
+| Open the app on a new device (downloads 13 MB, sent gzipped as 1.7 MB) | 1.8 s | 4.7 s |
+
+Lists show the most important 100 rows first, with a button to show more.
+
 ## Move your data from the claude.ai version
 
 1. In the claude.ai ledger, open **Store → Download backup**.

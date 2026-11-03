@@ -382,9 +382,16 @@ const pad=n=>String(n).padStart(2,"0");
 const ymd=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 const today=()=>ymd(new Date());
 const addDays=(s,n)=>{const d=new Date(s+"T00:00:00");d.setDate(d.getDate()+Number(n||0));return ymd(d);};
-const daysBetween=(a,b)=>Math.round((new Date(b+"T00:00:00")-new Date(a+"T00:00:00"))/864e5);
-const fmtDate=s=>s?new Date(s+"T00:00:00").toLocaleDateString("en-PH",{month:"short",day:"numeric",year:"numeric"}):"—";
-const fmtStamp=ms=>ms>1e9?new Date(ms).toLocaleString("en-PH",{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"}):"";
+// Day numbers are cached: parsing dates was a large part of drawing big lists (PR-09).
+const DAY_NUM=new Map();
+const dayNum=s=>{ let v=DAY_NUM.get(s); if(v===undefined){ const [y,m,d]=String(s).slice(0,10).split("-").map(Number); v=Math.round(Date.UTC(y,m-1,d)/864e5); if(DAY_NUM.size>20000) DAY_NUM.clear(); DAY_NUM.set(s,v); } return v; };
+const daysBetween=(a,b)=>dayNum(b)-dayNum(a);
+// Formatters are created once and dates cached: building them per call was the
+// biggest cost of drawing large lists (PR-09).
+const DATE_FMT=new Intl.DateTimeFormat("en-PH",{month:"short",day:"numeric",year:"numeric"}), STAMP_FMT=new Intl.DateTimeFormat("en-PH",{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"}), MONTH_FMT=new Intl.DateTimeFormat("en-PH",{month:"short",year:"numeric"});
+const DATE_CACHE=new Map();
+const fmtDate=s=>{ if(!s) return "—"; let v=DATE_CACHE.get(s); if(v===undefined){ v=DATE_FMT.format(new Date(s+"T00:00:00")); if(DATE_CACHE.size>5000) DATE_CACHE.clear(); DATE_CACHE.set(s,v); } return v; };
+const fmtStamp=ms=>ms>1e9?STAMP_FMT.format(new Date(ms)):"";
 const METHODS=["Cash","GCash","Maya","Bank transfer","Check","Other"];
 const TYPE_LABEL={sale:"Credit sale",payment:"Payment",return:"Return",adjustment:"Adjustment",writeoff:"Write-off"};
 const PREFIX={sale:"DR",payment:"OR",return:"RT",adjustment:"ADJ",writeoff:"WO"};
@@ -428,7 +435,12 @@ function nextNo(type){
   S.txns.forEach(t=>{ if(t.type===type&&typeof t.no==="string"&&t.no.startsWith(pre+"-")){ const n=parseInt(t.no.slice(pre.length+1),10); if(n>max) max=n; } });
   return `${pre}-${String(max+1).padStart(5,"0")}`;
 }
-function dealerTxns(id,incVoid){ return [...S.txns.entries()].filter(([,t])=>t.dealerId===id&&(incVoid||isLive(t))).sort((a,b)=>(a[1].date||"").localeCompare(b[1].date||"")||(a[1].createdAt||0)-(b[1].createdAt||0)); }
+// PR-09: transactions grouped by dealer once per data change, instead of scanning all of them per dealer.
+const TX_INDEX={key:null,map:new Map()};
+function dealerTxns(id,incVoid){
+  if(TX_INDEX.key!==S._ver||TX_INDEX.src!==S.txns){ const m=new Map(); for(const e of S.txns.entries()){ let a=m.get(e[1].dealerId); if(!a) m.set(e[1].dealerId,a=[]); a.push(e); }
+    m.forEach(a=>a.sort((a,b)=>(a[1].date||"").localeCompare(b[1].date||"")||(a[1].createdAt||0)-(b[1].createdAt||0))); TX_INDEX.key=S._ver; TX_INDEX.src=S.txns; TX_INDEX.map=m; }
+  const a=TX_INDEX.map.get(id)||[]; return incVoid?a.slice():a.filter(([,t])=>isLive(t)); }
 // Settles a dealer's live transactions ([[id,t],…] in date order). A payment with `alloc`
 // pays the chosen deliveries first (FR-085); everything else pays the oldest unpaid
 // delivery first. Same rules as settle() in lib/credit.js.
@@ -452,11 +464,13 @@ function dealerStatus(id){
     nextDue:open.filter(o=>!o.late&&o.dueDate).map(o=>o.dueDate).sort()[0]||null,
     lastPay:tx.filter(t=>t.type==="payment").map(t=>t.date).sort().pop()||null };
 }
+const MONTHS_CACHE={day:null,list:null};
+function lastSixMonths(){ const t0=today(); if(MONTHS_CACHE.day!==t0){ const d0=new Date(), out=[]; for(let i=5;i>=0;i--){ const dt=new Date(d0.getFullYear(),d0.getMonth()-i,1); out.push({ym:ymd(dt).slice(0,7),label:MONTH_FMT.format(dt)}); } MONTHS_CACHE.day=t0; MONTHS_CACHE.list=out; } return MONTHS_CACHE.list; }
 // Credit history: when each delivery was fully paid (FIFO), on-time rate and a simple rating.
 function creditHistory(id){
   const all=dealerTxns(id), tx=all.map(([,t])=>t), t0=today(); const R=settle(all), queue=R.open, settled=R.settled;
-  const rows=[...settled.map(s=>({t:s.t,paid:s.paid,late:s.t.dueDate?Math.max(0,daysBetween(s.t.dueDate,s.paid)):0,days:daysBetween(s.t.date,s.paid)})),
-    ...queue.map(q=>({t:q.t,paid:null,rem:q.rem,late:q.t.dueDate&&q.t.dueDate<t0?daysBetween(q.t.dueDate,t0):0}))].sort((a,b)=>(b.t.date||"").localeCompare(a.t.date||""));
+  const rows=[...settled.map(s=>({id:s.id,t:s.t,paid:s.paid,late:s.t.dueDate?Math.max(0,daysBetween(s.t.dueDate,s.paid)):0,days:daysBetween(s.t.date,s.paid)})),
+    ...queue.map(q=>({id:q.id,t:q.t,paid:null,rem:q.rem,late:q.t.dueDate&&q.t.dueDate<t0?daysBetween(q.t.dueDate,t0):0}))].sort((a,b)=>(b.t.date||"").localeCompare(a.t.date||""));
   const n=settled.length, done=rows.filter(r=>r.paid), onTime=done.filter(r=>r.late===0).length;
   const avgDays=n?Math.round(done.reduce((a,r)=>a+r.days,0)/n):null, avgLate=n?done.reduce((a,r)=>a+r.late,0)/n:0;
   const worst=rows.reduce((m,r)=>Math.max(m,r.late),0), openLate=rows.filter(r=>!r.paid).reduce((m,r)=>Math.max(m,r.late),0);
@@ -464,8 +478,8 @@ function creditHistory(id){
   const sumCharges=r2(tx.filter(isCharge).reduce((a,t)=>a+t.amount,0));
   let score=100; if(n) score-=(1-onTime/n)*40; score-=Math.min(30,avgLate); if(openLate>30) score-=25; if(openLate>holdDays()) score-=40; else if(openLate>0) score-=10;
   const grade=n<2&&!openLate?{g:"New",label:"Not enough history yet",cls:"neutral"}:score>=85?{g:"A",label:"Excellent payer",cls:"good"}:score>=70?{g:"B",label:"Good payer",cls:"good"}:score>=50?{g:"C",label:"Pays late often",cls:"warn"}:{g:"D",label:"High risk",cls:"bad"};
-  const months=[]; const d0=new Date(); for(let i=5;i>=0;i--){ const dt=new Date(d0.getFullYear(),d0.getMonth()-i,1); const ym=ymd(dt).slice(0,7);
-    const inM=tx.filter(t=>(t.date||"").startsWith(ym)); months.push({label:dt.toLocaleDateString("en-PH",{month:"short",year:"numeric"}),taken:r2(inM.filter(isCharge).reduce((a,t)=>a+t.amount,0)),paid:r2(inM.filter(t=>t.type==="payment").reduce((a,t)=>a+t.amount,0)),ret:r2(inM.filter(t=>t.type==="return").reduce((a,t)=>a+t.amount,0))}); }
+  const months=lastSixMonths().map(m=>({label:m.label,ym:m.ym,taken:0,paid:0,ret:0})), byYm=new Map(months.map(m=>[m.ym,m]));
+  for(const t of tx){ const m=byYm.get((t.date||"").slice(0,7)); if(!m) continue; if(isCharge(t)) m.taken=r2(m.taken+t.amount); else if(t.type==="payment") m.paid=r2(m.paid+t.amount); else if(t.type==="return") m.ret=r2(m.ret+t.amount); }
   return {rows,n,onTime,avgDays,worst,grade,score:Math.round(score),taken:sumCharges,paid:sum("payment"),returned:sum("return"),writeoff:sum("writeoff"),since:tx.length?tx[0].date:null,months};
 }
 const HIST_CACHE={key:null,map:new Map()};
@@ -580,12 +594,12 @@ function vOverview(){
       <section class="panel">
         <div class="panel-head"><h2>Needs collection</h2><span class="small muted">Largest overdue first</span></div>
         ${od.length?`<div class="tbl-wrap"><table><thead><tr><th>Dealer</th><th class="r">Overdue</th><th class="r">Balance</th><th>Status</th></tr></thead><tbody>
-        ${od.map(({d,id,st})=>`<tr class="click" tabindex="0" data-dealer="${id}"><td><b>${esc(d.name)}</b>${samplePill(d)}<div class="small muted">${esc(d.phone||"")}${d.area?" · "+esc(d.area):""}</div></td><td class="r num"><b>${P(st.overdue)}</b></td><td class="r num">${P(st.balance)}</td><td>${statusPill(st,d)}</td></tr>`).join("")}
-        </tbody></table></div>`:`<div class="empty"><h3>No overdue accounts</h3><p>Every dealer is paid up or still within terms.</p></div>`}
+        ${od.slice(0,15).map(({d,id,st})=>`<tr class="click" tabindex="0" data-dealer="${id}"><td><b>${esc(d.name)}</b>${samplePill(d)}<div class="small muted">${esc(d.phone||"")}${d.area?" · "+esc(d.area):""}</div></td><td class="r num"><b>${P(st.overdue)}</b></td><td class="r num">${P(st.balance)}</td><td>${statusPill(st,d)}</td></tr>`).join("")}
+        </tbody></table></div>${od.length>15?`<p class="small muted" style="margin:8px 0 0">And ${od.length-15} more. <button class="btn sm" data-act="go-collect" type="button">Open the collection list</button></p>`:""}`:`<div class="empty"><h3>No overdue accounts</h3><p>Every dealer is paid up or still within terms.</p></div>`}
       </section>
       <section class="panel">
         <div class="panel-head"><h2>Due in the next 7 days</h2></div>
-        ${dueSoon.length?`<div class="tbl-wrap"><table><tbody>${dueSoon.map(({d,id,o})=>`<tr class="click" tabindex="0" data-dealer="${id}"><td><b>${esc(d.name)}</b><div class="small muted">${esc(o.no||"")} · released ${fmtDate(o.date)}</div></td><td class="small nowrap">Due ${fmtDate(o.dueDate)}</td><td class="r num">${P(o.remaining)}</td></tr>`).join("")}</tbody></table></div>`:`<p class="muted small" style="margin:0">Nothing falls due this week.</p>`}
+        ${dueSoon.length?`<div class="tbl-wrap"><table><tbody>${dueSoon.slice(0,15).map(({d,id,o})=>`<tr class="click" tabindex="0" data-dealer="${id}"><td><b>${esc(d.name)}</b><div class="small muted">${esc(o.no||"")} · released ${fmtDate(o.date)}</div></td><td class="small nowrap">Due ${fmtDate(o.dueDate)}</td><td class="r num">${P(o.remaining)}</td></tr>`).join("")}</tbody></table></div>`:`<p class="muted small" style="margin:0">Nothing falls due this week.</p>`}
       </section>
     </div>
     <div class="col">
@@ -618,13 +632,13 @@ function vDealers(){
       ${tags.length?`<select id="tagFilter" aria-label="Tag"><option value="">All tags</option>${tags.map(t=>`<option ${t===S.tagF?"selected":""}>${esc(t)}</option>`).join("")}</select>`:""}
       ${arch?`<label class="chk"><input type="checkbox" id="showArch" ${S.showArchived?"checked":""}> Show ${arch} archived</label>`:""}</div>
     ${rows.length?`<div class="tbl-wrap"><table><thead><tr><th>Dealer</th><th>Stage</th><th class="r">Balance</th><th>Credit used</th><th>Next due</th><th>Follow-up</th><th>Rating</th><th>Status</th></tr></thead><tbody>
-    ${rows.map(({id,d,st})=>{ const pct=d.creditLimit?Math.min(100,Math.max(0,st.balance/d.creditLimit*100)):0; const cls=pct>=100?"bad":pct>=80?"warn":""; const pr=isProspect(d)||stageOf(d)==="lost";
+    ${rows.slice(0,S.allDealers?Infinity:100).map(({id,d,st})=>{ const pct=d.creditLimit?Math.min(100,Math.max(0,st.balance/d.creditLimit*100)):0; const cls=pct>=100?"bad":pct>=80?"warn":""; const pr=isProspect(d)||stageOf(d)==="lost";
       return `<tr class="click" tabindex="0" data-dealer="${id}"><td><b>${esc(d.name)}</b>${samplePill(d)}${d.active===false?` <span class="pill neutral">Archived</span>`:""}<div class="small muted">${esc(d.phone||"")}${d.area?" · "+esc(d.area):""}</div>${(d.tags||[]).length?`<div>${d.tags.slice(0,3).map(t=>`<span class="pill neutral tag">${esc(t)}</span>`).join(" ")}</div>`:""}</td>
       <td>${stagePill(d)}</td>
       <td class="r num"><b>${pr&&!st.balance?"—":P(st.balance)}</b></td>
       <td class="small num">${pr?`<span class="muted">—</span>`:d.creditLimit?`${Math.round(pct)}% of ${P(d.creditLimit)}<div class="meter"><i class="${cls}" style="width:${pct}%"></i></div>`:`<span class="muted">No limit</span>`}</td>
       <td class="small nowrap">${st.nextDue?fmtDate(st.nextDue):"—"}</td><td class="small nowrap">${followUpCell(id)}</td><td>${pr?"":gradePill(history(id))}</td><td>${pr?"":statusPill(st,d)}</td></tr>`;}).join("")}
-    </tbody></table></div>`:(S.dealers.size?`<div class="empty"><h3>No match</h3><p>${S.q?`No one matches “${esc(S.q)}”.`:"No one in this list yet."}</p></div>`:emptyStart())}
+    </tbody></table></div>${rows.length>100&&!S.allDealers?`<p class="small muted">Showing the 100 largest balances of ${rows.length}. Search to find others, or <button class="btn sm" data-act="all-dealers" type="button">show all ${rows.length}</button></p>`:""}`:(S.dealers.size?`<div class="empty"><h3>No match</h3><p>${S.q?`No one matches “${esc(S.q)}”.`:"No one in this list yet."}</p></div>`:emptyStart())}
   </section>`;
 }
 function vProducts(){
@@ -659,19 +673,22 @@ function txDetails(t){
   return `${no}<span class="pill good">${t.payKind==="partial"?"Partial payment":t.payKind==="full"?"Full payment":"Payment"}</span>${vd} <span class="small">${esc(t.method||"")}${t.ref?" · Ref "+esc(t.ref):""}${(t.alloc||[]).length?` · for ${t.alloc.map(a=>esc(a.no||"delivery")).join(", ")}`:""}</span>${t.note?`<div class="small muted">${esc(t.note)}</div>`:""}`;
 }
 const sign=t=>isCharge(t)?"":"−";
+// Newest first, sorted once per data change (PR-09).
+const SORTED_TX={key:null,list:[]};
+function sortedTxns(){ if(SORTED_TX.key!==S._ver||SORTED_TX.src!==S.txns){ SORTED_TX.list=[...S.txns.entries()].sort((a,b)=>{ const x=a[1].date||"", y=b[1].date||""; return x<y?1:x>y?-1:(b[1].createdAt||0)-(a[1].createdAt||0); }); SORTED_TX.key=S._ver; SORTED_TX.src=S.txns; } return SORTED_TX.list; }
 function vActivity(){
   const q=S.q.toLowerCase();
-  const rows=[...S.txns.entries()].filter(([,t])=>S.txFilter==="all"?true:S.txFilter==="voided"?t.voided:(t.type===S.txFilter&&!t.voided))
+  const rows=sortedTxns().filter(([,t])=>S.txFilter==="all"?true:S.txFilter==="voided"?t.voided:(t.type===S.txFilter&&!t.voided))
     .filter(([,t])=>{ if(!q) return true; const d=S.dealers.get(t.dealerId); return [d&&d.name,t.no,t.note,t.ref,t.method,(t.items||[]).map(i=>i.name).join(" ")].join(" ").toLowerCase().includes(q); })
-    .sort((a,b)=>(b[1].date||"").localeCompare(a[1].date||"")||(b[1].createdAt||0)-(a[1].createdAt||0));
-  const shown=rows.slice(0,300);
+    ;
+  const shown=rows.slice(0,S.txShow||100);
   return sampleBanner()+`<section class="panel">
     <div class="panel-head"><h2>Transactions</h2><div class="actions">${downloads?`<button class="btn sm" data-act="export-tx" type="button">Export CSV</button>`:""}${S.canWrite?`<button class="btn sm" data-act="new-return" type="button">+ Return</button>`:""}</div></div>
     <div class="toolbar"><input id="q" type="search" placeholder="Search dealer, DR/OR no., product, reference" value="${esc(S.q)}" aria-label="Search transactions">
       <select id="txFilter" aria-label="Type">${[["all","All"],["sale","Credit sales"],["payment","Payments"],["return","Returns"],["adjustment","Adjustments"],["writeoff","Write-offs"],["voided","Voided"]].map(([v,l])=>`<option value="${v}" ${S.txFilter===v?"selected":""}>${l}</option>`).join("")}</select></div>
     ${rows.length?`<div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Dealer</th><th>Details</th><th class="r">Amount</th></tr></thead><tbody>
     ${shown.map(([id,t])=>{ const d=S.dealers.get(t.dealerId); return `<tr class="click ${t.voided?"void":""}" tabindex="0" data-tx="${id}"><td class="small nowrap">${fmtDate(t.date)}</td><td><b>${esc(d?d.name:"(removed dealer)")}</b>${samplePill(t)}</td><td>${txDetails(t)}</td><td class="r num nowrap amt">${sign(t)}${P(t.amount)}</td></tr>`; }).join("")}
-    </tbody></table></div>${rows.length>300?`<p class="small muted">Showing the latest 300 of ${rows.length}. Search or export CSV to see older ones.</p>`:""}`:`<div class="empty"><h3>No transactions</h3><p>Credit sales, payments and returns you record will be listed here.</p></div>`}
+    </tbody></table></div>${rows.length>shown.length?`<p class="small muted">Showing the latest ${shown.length} of ${rows.length}. <button class="btn sm" data-act="more-tx" type="button">Show ${Math.min(500,rows.length-shown.length)} more</button> Search or export CSV to find older ones.</p>`:""}`:`<div class="empty"><h3>No transactions</h3><p>Credit sales, payments and returns you record will be listed here.</p></div>`}
   </section>`;
 }
 function rangeDates(){
@@ -910,11 +927,11 @@ function vCollect(){
     <div class="panel-head"><h2>Collection list</h2><span class="small muted">${done} of ${rows.length} reminded today</span></div>
     <div class="toolbar"><div class="seg" role="group" aria-label="Show"><button type="button" data-cf="due" aria-pressed="${!all}">Overdue or due in 3 days</button><button type="button" data-cf="all" aria-pressed="${all}">Everyone with a balance</button></div></div>
     ${rows.length?`<div class="tbl-wrap"><table><thead><tr><th>Dealer</th><th class="r">To collect</th><th>Status</th><th>Last reminded</th><th></th></tr></thead><tbody>
-    ${rows.map(({id,d,st})=>`<tr><td><a href="#collect" data-dealer="${id}" style="color:inherit"><b>${esc(d.name)}</b></a>${samplePill(d)}<div class="small" style="user-select:all">${esc(d.phone||"No number")}</div></td>
+    ${rows.slice(0,S.collectShow||100).map(({id,d,st})=>`<tr><td><a href="#collect" data-dealer="${id}" style="color:inherit"><b>${esc(d.name)}</b></a>${samplePill(d)}<div class="small" style="user-select:all">${esc(d.phone||"No number")}</div></td>
       <td class="r num nowrap"><b>${P(st.overdue||st.balance)}</b><div class="small muted">${st.overdue?"of "+P(st.balance)+" balance":"due "+fmtDate(st.nextDue)}</div></td>
       <td>${statusPill(st,d)}</td><td class="small nowrap">${d.lastReminded?(d.lastReminded===t0?`<span class="pill good">Today</span>`:fmtDate(d.lastReminded)):"Never"}</td>
       <td class="r"><div class="actions" style="justify-content:flex-end;flex-wrap:nowrap"><button class="btn sm" data-act="remind-copy" data-id="${id}" type="button">Copy message</button>${S.canWrite?`<button class="btn sm" data-act="remind-mark" data-id="${id}" type="button">${d.lastReminded===t0?"Reminded ✓":"Mark reminded"}</button>`:""}</div></td></tr>`).join("")}
-    </tbody></table></div>`:`<div class="empty"><h3>Nobody to chase today</h3><p>No dealer is overdue or due in the next 3 days.</p></div>`}
+    </tbody></table></div>${rows.length>(S.collectShow||100)?`<p class="small muted">Showing the ${S.collectShow||100} most urgent of ${rows.length}. <button class="btn sm" data-act="more-collect" type="button">Show all</button></p>`:""}`:`<div class="empty"><h3>Nobody to chase today</h3><p>No dealer is overdue or due in the next 3 days.</p></div>`}
     <p class="small muted" style="margin:12px 0 0">Copy the message, then paste it in Messenger, Viber or SMS. You can change the wording in the Store tab.</p></section>`;
 }
 function countSheet(){
@@ -1595,7 +1612,7 @@ function creditHistoryPanel(id){
       ${h.months.map(m=>`<tr><td class="small nowrap">${m.label}</td><td class="num small"><div class="meter" style="max-width:160px"><i style="width:${m.taken/maxM*100}%;background:var(--warn)"></i></div>${P(m.taken)}</td><td class="num small"><div class="meter" style="max-width:160px"><i style="width:${m.paid/maxM*100}%;background:var(--good)"></i></div>${P(m.paid)}</td></tr>`).join("")}
     </tbody></table></div>
     ${h.rows.length?`<h3 style="font-size:14px;margin:16px 0 8px">Payment record per delivery</h3><div class="tbl-wrap"><table><thead><tr><th>Delivery</th><th>Due</th><th>Fully paid</th><th>Result</th></tr></thead><tbody>
-      ${h.rows.slice(0,24).map(r=>`<tr class="click" tabindex="0" data-tx="${esc([...S.txns.entries()].find(([,x])=>x===r.t)?.[0]||"")}"><td class="small"><b>${esc(r.t.no||"")}</b> ${fmtDate(r.t.date)}<div class="muted num">${P(r.t.amount)}${r.rem?` · ${P(r.rem)} left`:""}</div></td><td class="small nowrap">${fmtDate(r.t.dueDate)}</td><td class="small nowrap">${r.paid?fmtDate(r.paid)+`<div class="muted">${r.days} days</div>`:"—"}</td><td>${res(r)}</td></tr>`).join("")}
+      ${h.rows.slice(0,24).map(r=>`<tr class="click" tabindex="0" data-tx="${esc(r.id||"")}"><td class="small"><b>${esc(r.t.no||"")}</b> ${fmtDate(r.t.date)}<div class="muted num">${P(r.t.amount)}${r.rem?` · ${P(r.rem)} left`:""}</div></td><td class="small nowrap">${fmtDate(r.t.dueDate)}</td><td class="small nowrap">${r.paid?fmtDate(r.paid)+`<div class="muted">${r.days} days</div>`:"—"}</td><td>${res(r)}</td></tr>`).join("")}
     </tbody></table></div>${h.rows.length>24?`<p class="small muted">Showing the latest 24 of ${h.rows.length} deliveries.</p>`:""}`:""}
     <h3 style="font-size:14px;margin:16px 0 8px">Credit limit changes</h3>
     ${lim.length?`<table><tbody>${lim.map(x=>`<tr><td class="small nowrap">${fmtStamp(x.at)}</td><td class="small num">${x.from==null?"No limit":P(x.from)} → <b>${x.to==null?"No limit":P(x.to)}</b></td><td class="small muted">${esc(nameOf(x.by))}</td></tr>`).join("")}</tbody></table>`:`<p class="small muted" style="margin:0">No changes recorded. Current limit: ${d.creditLimit?P(d.creditLimit):"none"}.</p>`}
@@ -2210,7 +2227,7 @@ document.addEventListener("click",e=>{
        "pd-export":()=>guarded(a,async()=>{ const data=await window.APP.exportDealer(id); await save(`personal-data-${(S.dealers.get(id)||{}).name||id}.json`.replace(/[^\w.-]+/g,"_"),JSON.stringify(data,null,1)); a.disabled=false; }),
        "pd-remove":()=>{ if(!armed(a,"Tap again: remove name, phone, address and notes")) return; guarded(a,async()=>{ await window.APP.anonymiseDealer(id); toast("Personal data removed. Financial records were kept."); closeAll(); }); }, "approvals":()=>approvalsSheet(),
        "load-audit":()=>guarded(a,async()=>{ S.audit=await window.APP.audit(150); render(); }),
-       "go-store":()=>goView("store"), "backup-run":()=>guarded(a,async()=>{ a.textContent="Backing up…"; try{ S.backup=await window.APP.backupRun(); toast("Backup made and verified"); }catch(e){ if(e&&e.status===500) await loadBackupStatus(); throw e; } render(); }),
+       "go-store":()=>goView("store"), "all-dealers":()=>{ S.allDealers=true; render(); }, "more-tx":()=>{ S.txShow=(S.txShow||100)+500; render(); }, "more-collect":()=>{ S.collectShow=Infinity; render(); }, "backup-run":()=>guarded(a,async()=>{ a.textContent="Backing up…"; try{ S.backup=await window.APP.backupRun(); toast("Backup made and verified"); }catch(e){ if(e&&e.status===500) await loadBackupStatus(); throw e; } render(); }),
        "go-dealers":()=>goView("dealers"), "go-collect":()=>goView("collect"), "count":()=>countSheet(),
        "opening-for":()=>openingForm(id), "new-opening":()=>openingForm(),
        "remind-copy":()=>copyText(reminderText(id),"Reminder message"),
