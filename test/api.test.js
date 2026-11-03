@@ -22,7 +22,7 @@ test("upgrading an older database keeps accounts and sessions", () => {
     PRAGMA user_version = 1;`);
   old.close();
   const db = openDb(d);
-  assert.equal(db.pragma("user_version", { simple: true }), 2);
+  assert.equal(db.pragma("user_version", { simple: true }), 3);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM users").get().n, 1);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM sessions").get().n, 1, "sessions survive the upgrade");
   db.prepare("INSERT INTO users (id, username, name, role, password_hash, active, created_at, dealer_id) VALUES ('u2','m','M','dealer','x',1,1,'d1')").run();
@@ -705,4 +705,53 @@ test("backups are verified, failures alert, and a backup restores (PR-08)", asyn
   assert.equal(no.status, 1);
   assert.ok(fs.readdirSync(target).filter((f) => f.startsWith("ledger.before-restore")).length === 0, "nothing replaced");
   fs.rmSync(target, { recursive: true, force: true });
+});
+
+test("two-step sign-in, shorter staff sessions and remote sign-out (PR-10)", async () => {
+  const totp = require("../lib/totp");
+  await owner("POST", "/api/users", { name: "Eve Editor", username: "eve", password: "editorpass1", role: "editor" });
+  const eve = client();
+  assert.equal((await eve("POST", "/api/login", { username: "eve", password: "editorpass1" })).status, 200);
+
+  // Set up: scan the QR, confirm a code, get recovery codes.
+  const setup = await eve("POST", "/api/me/2fa/setup");
+  assert.match(setup.data.otpauth, /^otpauth:\/\/totp\//);
+  assert.match(setup.data.qr, /^data:image\/png;base64,/);
+  const secret = setup.data.secret.replace(/\s/g, "");
+  assert.equal((await eve("POST", "/api/me/2fa/enable", { code: "000000" })).status, 400);
+  const firstCode = totp.codeAt(secret, totp.counterAt());
+  const on = await eve("POST", "/api/me/2fa/enable", { code: firstCode });
+  assert.equal(on.status, 200);
+  assert.equal(on.data.recoveryCodes.length, 8);
+  assert.equal((await eve("GET", "/api/me")).data.twoStep, true, "current session kept");
+  assert.equal((await owner("GET", "/api/users")).data.find((u) => u.username === "eve").twoStep, true);
+
+  // Signing in now needs a fresh code; a used code or a wrong one is refused.
+  const dev = client();
+  assert.equal((await dev("POST", "/api/login", { username: "eve", password: "editorpass1" })).data.code, "totp_required");
+  assert.equal((await dev("POST", "/api/login", { username: "eve", password: "editorpass1", code: "123456" })).data.code, "totp_invalid");
+  assert.equal((await dev("POST", "/api/login", { username: "eve", password: "editorpass1", code: firstCode })).data.code, "totp_invalid", "same code can't be used twice");
+  const rec = on.data.recoveryCodes[0];
+  assert.equal((await dev("POST", "/api/login", { username: "eve", password: "editorpass1", code: rec })).status, 200, "recovery code works once");
+  assert.equal((await client()("POST", "/api/login", { username: "eve", password: "editorpass1", code: rec })).status, 401);
+
+  // The owner signs Eve out everywhere: her devices are told to wipe offline data.
+  assert.equal((await staff("POST", "/api/users/x/signout")).status, 403);
+  const eveId = (await owner("GET", "/api/users")).data.find((u) => u.username === "eve").id;
+  assert.equal((await owner("POST", `/api/users/${eveId}/signout`)).status, 200);
+  const gone = await dev("GET", "/api/c/dealers");
+  assert.equal(gone.status, 401);
+  assert.equal(gone.data.code, "revoked");
+  assert.equal((await dev("GET", "/")).status, 302);
+  // The owner resets her two-step sign-in (lost phone): password alone works again.
+  await owner("PATCH", `/api/users/${eveId}`, { resetTwoStep: true });
+  assert.equal((await client()("POST", "/api/login", { username: "eve", password: "editorpass1" })).status, 200);
+
+  // Staff sessions last 7 days, owners' and editors' 30.
+  const cookieDays = async (username, password) => {
+    const r = await fetch(base + "/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) });
+    return Math.round(Number(/Max-Age=(\d+)/.exec(r.headers.get("set-cookie"))[1]) / 86400);
+  };
+  assert.equal(await cookieDays("ben", "staffpass1"), 7);
+  assert.equal(await cookieDays("eve", "editorpass1"), 30);
 });

@@ -33,12 +33,20 @@ button[disabled]{opacity:.6}
     <label id="nameRow" hidden>Your name<input id="name" autocomplete="name"></label>
     <label>Username<input id="username" autocomplete="username" autocapitalize="none" required></label>
     <label>Password<input id="password" type="password" autocomplete="current-password" required></label>
+    <label id="codeRow" hidden>Code from your authenticator app<input id="code" inputmode="numeric" autocomplete="one-time-code" placeholder="6 digits, or a recovery code"></label>
     <button id="go" type="submit">Sign in</button>
   </form>
 </main>
 <script>
 (async () => {
   const $ = (s) => document.querySelector(s);
+  // The owner signed this device out remotely: remove the offline copy of the ledger.
+  if (new URLSearchParams(location.search).has("wiped")) {
+    try { indexedDB.deleteDatabase("dcl-offline"); } catch (e) {}
+    try { (await navigator.serviceWorker?.getRegistration())?.active?.postMessage("clear"); } catch (e) {}
+    $("#err").textContent = "This device was signed out by the owner, and the ledger data saved on it was removed."; $("#err").hidden = false;
+    history.replaceState(null, "", "/login");
+  }
   let setup = false;
   try { setup = (await (await fetch("/api/setup")).json()).needsSetup; } catch (e) {}
   if (setup) {
@@ -53,9 +61,11 @@ button[disabled]{opacity:.6}
     const btn = $("#go"); btn.disabled = true; $("#err").hidden = true;
     const body = { username: $("#username").value.trim(), password: $("#password").value };
     if (setup) body.name = $("#name").value.trim();
+    if (!$("#codeRow").hidden) body.code = $("#code").value.trim();
     try {
       const r = await fetch(setup ? "/api/setup" : "/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const d = await r.json().catch(() => ({}));
+      if (d.code === "totp_required") { $("#codeRow").hidden = false; $("#code").focus(); btn.disabled = false; btn.textContent = "Verify"; return; }
       if (!r.ok) throw new Error(d.message || "Couldn't sign in. Try again.");
       location.href = "/";
     } catch (err) { $("#err").textContent = err.message; $("#err").hidden = false; btn.disabled = false; }

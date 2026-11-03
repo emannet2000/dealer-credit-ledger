@@ -72,6 +72,7 @@ Open http://localhost:3000. The first visit asks you to create the **owner** acc
 | `DATA_DIR` | `./data` | Where the database, photos and daily backups are stored. **Back up this folder.** |
 | `COOKIE_SECURE` | `false` | Set to `true` when the site uses HTTPS. Also turns on the HTTPS redirect and HSTS. **Required when `NODE_ENV=production`.** |
 | `ALLOW_INSECURE_HTTP` | — | Set to `true` only to try the production build on a local network without HTTPS. Never on a public server. |
+| `STAFF_SESSION_DAYS` | `7` | How long staff and viewer accounts (collectors' phones) stay signed in without being used. Owners and editors stay signed in for 30 days and should turn on two-step sign-in. |
 | `TZ` | `Asia/Manila` | Time zone for "today", due dates and staff edit limits |
 | `BACKUP_KEEP` | `30` | Number of daily backups to keep |
 | `BACKUP_SYNC_CMD` | — | Command run after each daily backup to copy it offsite. The finished file is passed in `BACKUP_FILE`, e.g. `rclone copy "$BACKUP_FILE" remote:ledger-backups`. **Set this before going live.** |
@@ -129,6 +130,12 @@ The app must be served over HTTPS before real dealers and money go into it. Pass
 4. Restart the app and open `https://ledger.example.com`. Check that `http://` redirects to `https://`.
 
 With `COOKIE_SECURE=true` the app also redirects any plain-HTTP request it receives to HTTPS and sends `Strict-Transport-Security`. Every page is served with a Content-Security-Policy that allows only the app's own scripts and Google Fonts. The app trusts one proxy in front of it for `X-Forwarded-Proto`; don't expose port 3000 directly.
+
+## Accounts and lost phones
+
+- **Two-step sign-in:** each person can turn it on in **Store → Your account** with an authenticator app (Google Authenticator, Microsoft Authenticator, Authy). They get 8 single-use recovery codes. Owners and editors are reminded on the Overview until it is on.
+- **Lost phone:** the owner opens the person in **Store → Team accounts** and taps **Sign out everywhere**. When that phone next connects, it deletes the ledger data it saved for offline use. **Reset two-step sign-in** lets someone who lost their authenticator set it up again.
+- Changing a password or disabling an account also signs out that person's other devices.
 
 ## Backups
 

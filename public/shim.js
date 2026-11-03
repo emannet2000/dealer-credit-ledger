@@ -15,8 +15,13 @@
       });
     } catch (e) { setOnline(false); throw { ...OFFLINE }; }
     setOnline(true);
-    if (r.status === 401) { location.href = "/login"; throw { code: "unauthenticated", message: "Signed out" }; }
     const data = await r.json().catch(() => ({}));
+    if (r.status === 401) {
+      // Signed out remotely (lost phone): wipe the offline copy before leaving.
+      if (data.code === "revoked") { try { await kv.clear(); (await navigator.serviceWorker?.getRegistration())?.active?.postMessage("clear"); } catch (e) {} location.href = "/login?wiped=1"; }
+      else location.href = "/login";
+      throw { code: "unauthenticated", message: "Signed out" };
+    }
     if (!r.ok) throw { code: data.code || (r.status === 413 ? "too_large" : "unavailable"), message: data.message || "Request failed", userMsg: data.message, status: r.status };
     return data;
   }
@@ -239,11 +244,16 @@
   /* ---------- account helpers used by the Store tab ---------- */
   window.APP = Object.freeze({
     node: true,
-    me,
+    me: () => { meP = null; return me(); },
     users: () => users(true),
     createUser: (u) => api("POST", "/api/users", u).then((r) => (users(true), r)),
     updateUser: (id, u) => api("PATCH", "/api/users/" + encodeURIComponent(id), u).then((r) => (users(true), r)),
     changePassword: (current, next) => api("POST", "/api/me/password", { current, next }),
+    twoStepSetup: () => api("POST", "/api/me/2fa/setup", {}),
+    twoStepEnable: (code) => api("POST", "/api/me/2fa/enable", { code }),
+    twoStepDisable: (password) => api("POST", "/api/me/2fa/disable", { password }),
+    signoutOthers: () => api("POST", "/api/me/signout-others", {}),
+    signoutUser: (id) => api("POST", "/api/users/" + encodeURIComponent(id) + "/signout", {}),
     audit: (limit = 150) => api("GET", "/api/audit?limit=" + limit),
     backupFull: () => api("GET", "/api/backup/full"),
     backupStatus: () => api("GET", "/api/backup/status"),

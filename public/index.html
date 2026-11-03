@@ -888,6 +888,7 @@ function healthNotices(){
   if(nolim&&S.canWrite) out.push(`<div class="notice warn"><p><b>${nolim} dealer${nolim===1?" has":"s have"} no credit limit.</b> Set one for every dealer, even a high one, so the app can stop risky releases.</p><button class="btn sm" data-act="go-dealers" type="button">Review dealers</button></div>`);
   if(S.products.size&&S.canWrite){ const last=[...S.moves.values()].filter(m=>m.reason==="Stock count").map(m=>m.date).sort().pop();
     if(!last||daysBetween(last,today())>30) out.push(`<div class="notice warn"><p><b>Monthly stock count ${last?"is due":"not done yet"}.</b> ${last?`Last count was ${fmtDate(last)}.`:"Count your stock once a month to catch missing items."}</p><button class="btn sm" data-act="count" type="button">Start stock count</button></div>`); }
+  if(S.acct&&["owner","editor"].includes(S.acct.role)&&!S.acct.twoStep) out.push(`<div class="notice warn"><p><b>Turn on two-step sign-in.</b> Your account can change prices, credit limits and records, so protect it with a code from your phone.</p><button class="btn sm" data-act="2fa-setup" type="button">Set up</button></div>`);
   { const bp=backupProblems(); if(bp.length) out.push(`<div class="notice ${bp.some(p=>p[0]==="bad")?"bad":"warn"}"><p><b>Backups need attention.</b> ${bp.map(p=>esc(p[1])).join(" ")}</p><button class="btn sm" data-act="go-store" type="button">Backup status</button></div>`); }
   if(downloads&&real&&!window.APP){ const lb=Number(lsGet("lastBackup"))||0; const days=lb?Math.floor((Date.now()-lb)/864e5):null;
     if(days===null||days>=7) out.push(`<div class="notice warn"><p><b>${days===null?"No backup downloaded on this device yet.":`Last backup was ${days} days ago.`}</b> Download one every week.</p><button class="btn sm" data-act="backup" type="button">Download backup</button></div>`); }
@@ -2081,7 +2082,7 @@ function backupProblems(){ const b=S.backup; if(!b) return []; const out=[], now
 function teamPanel(){
   const me=S.acct||{}, owner=me.role==="owner", list=S.team||[];
   return `<section class="panel"><div class="panel-head"><h2>Team accounts</h2>${owner?`<button class="btn sm primary" data-act="new-user" type="button">+ Add person</button>`:""}</div>
-    ${list.length?`<table><tbody>${list.map(u=>`<tr><td><b>${esc(u.name)}</b>${u.id===me.id?" (you)":""}<div class="small muted">${esc(u.username||"")}</div></td><td><span class="pill ${u.active?(u.role==="dealer"?"good":"neutral"):"bad"}">${u.active?ROLE_L[u.role]:"Disabled"}</span>${u.role==="dealer"&&u.dealerId?`<div class="small muted">${esc((S.dealers.get(u.dealerId)||{}).name||"")}</div>`:""}</td><td class="r">${owner&&u.id!==me.id?`<button class="btn sm" data-act="edit-user" data-id="${esc(u.id)}" type="button">Edit</button>`:""}</td></tr>`).join("")}</tbody></table>`:`<p class="small muted">Loading…</p>`}
+    ${list.length?`<table><tbody>${list.map(u=>`<tr><td><b>${esc(u.name)}</b>${u.id===me.id?" (you)":""}<div class="small muted">${esc(u.username||"")}</div></td><td><span class="pill ${u.active?(u.role==="dealer"?"good":"neutral"):"bad"}">${u.active?ROLE_L[u.role]:"Disabled"}</span>${u.twoStep?` <span class="pill good">2-step</span>`:""}${u.role==="dealer"&&u.dealerId?`<div class="small muted">${esc((S.dealers.get(u.dealerId)||{}).name||"")}</div>`:""}</td><td class="r">${owner&&u.id!==me.id?`<button class="btn sm" data-act="edit-user" data-id="${esc(u.id)}" type="button">Edit</button>`:""}</td></tr>`).join("")}</tbody></table>`:`<p class="small muted">Loading…</p>`}
     <dl class="kv" style="margin-top:12px"><dt><span class="pill neutral">Staff</span></dt><dd>Record sales, payments, returns and stock. Can edit or void only what they recorded today. Can't change prices, credit limits or settings, or release goods to dealers on hold.</dd>
     <dt><span class="pill neutral">Editor</span></dt><dd>Everything staff can do, plus store settings, credit rules, prices, approving credit holds and editing any record.</dd>
     <dt><span class="pill neutral">Viewer</span></dt><dd>Can see everything but change nothing. Good for an accountant.</dd>
@@ -2089,11 +2090,12 @@ function teamPanel(){
     <dt><span class="pill good">Dealer portal</span></dt><dd>For a dealer: sees only their own balance, due dates, receipts, payment history and your catalog. Set it up from the dealer's page with “Portal access”.</dd></dl>
   </section>
   <section class="panel"><h2>Your account</h2><p class="small" style="margin-top:0">Signed in as <b>${esc(me.name||"")}</b> (${esc(me.username||"")}) · ${ROLE_L[me.role]||""}</p>
-    <div class="actions"><button class="btn sm" data-act="change-pw" type="button">Change password</button><button class="btn sm" data-act="logout" type="button">Sign out</button></div></section>
+    <p class="small">${me.twoStep?`<span class="pill good">Two-step sign-in is on</span> A code from your authenticator app is needed each time you sign in.`:`<span class="pill ${["owner","editor"].includes(me.role)?"warn":"neutral"}">Two-step sign-in is off</span> ${["owner","editor"].includes(me.role)?"Turn it on: your account can change prices, credit limits and records.":"Turn it on for extra protection if your phone is lost."}`}</p>
+    <div class="actions"><button class="btn sm" data-act="change-pw" type="button">Change password</button>${me.twoStep?`<button class="btn sm" data-act="2fa-off" type="button">Turn off two-step sign-in</button>`:`<button class="btn sm primary" data-act="2fa-setup" type="button">Set up two-step sign-in</button>`}<button class="btn sm" data-act="signout-others" type="button">Sign out my other devices</button><button class="btn sm" data-act="logout" type="button">Sign out</button></div></section>
   ${S.canAdmin?`<section class="panel"><div class="panel-head"><h2>Activity log</h2><button class="btn sm" data-act="load-audit" type="button">${S.audit?"Refresh":"Show recent activity"}</button></div>${S.audit?auditTable():`<p class="small muted" style="margin:0">Every sign-in, change and deletion is recorded with who did it and when.</p>`}</section>`:""}`;
 }
 function auditTable(){
-  const lbl={create:"Added",update:"Changed",delete:"Deleted",restore:"Restored",stock:"Stock changed",login:"Signed in",upload:"Photo added",setup:"Created the ledger",password_change:"Changed password",user_create:"Added account",user_update:"Changed account"};
+  const lbl={create:"Added",update:"Changed",delete:"Deleted",restore:"Restored",stock:"Stock changed",login:"Signed in",upload:"Photo added",setup:"Created the ledger",password_change:"Changed password",user_create:"Added account",user_update:"Changed account","2fa_enabled":"Turned on two-step sign-in","2fa_disabled":"Turned off two-step sign-in","2fa_recovery_used":"Used a recovery code",signout_others:"Signed out other devices",signout_everywhere:"Signed someone out everywhere",backup_run:"Ran a backup",asset_cleanup:"Removed unused pictures",approval_request:"Asked for approval",approval_approve:"Approved a sale",approval_reject:"Rejected a request",approval_withdraw:"Withdrew a request"};
   const what=a=>{ let d={}; try{ d=JSON.parse(a.detail||"{}")||{}; }catch(e){}
     if(a.collection==="txns") return `${esc(d.no||"")} ${esc(TYPE_LABEL[d.type]||"")} ${d.amount?P(d.amount):""}${d.voided?" (voided)":""}`;
     if(a.collection==="dealers"||a.collection==="products") return esc(d.name||"");
@@ -2110,7 +2112,11 @@ function userForm(id,presetDealer){
     <label class="f span" id="u-dwrap">Which dealer<select id="u-dealer"><option value="">Choose dealer…</option>${activeDealers().map(([did,dd])=>`<option value="${did}" ${(u?u.dealerId===did:presetDealer===did)?"selected":""}>${esc(dd.name)}</option>`).join("")}</select><span class="hint">They will only see this dealer's own records.</span></label>
     <label class="f">${u?"New password (leave blank to keep)":"Password"}<input id="u-pw" type="password" autocomplete="new-password" ${u?"":"required"} minlength="8" placeholder="At least 8 characters"></label>
     ${u?`<label class="chk span"><input type="checkbox" id="u-active" ${u.active?"checked":""}> Account active (untick to block sign-in right away)</label>`:""}
-    <div class="actions span"><button class="btn primary" type="submit">${u?"Save changes":"Add person"}</button><button class="btn" type="button" data-back>Cancel</button></div></form>`,sh=>{
+    <div class="actions span"><button class="btn primary" type="submit">${u?"Save changes":"Add person"}</button><button class="btn" type="button" data-back>Cancel</button></div></form>
+    ${u?`<section class="panel" style="margin-top:16px"><h2>Lost phone or left the business?</h2><p class="small" style="margin-top:0">“Sign out everywhere” ends all of ${esc(u.name)}'s sessions. Phones that saved ledger data for offline use delete it the next time they connect.</p>
+      <div class="actions"><button class="btn danger" type="button" id="u-signout">Sign out everywhere</button>${u.twoStep?`<button class="btn" type="button" id="u-reset2">Reset two-step sign-in</button>`:""}</div></section>`:""}`,sh=>{
+    const so=$("#u-signout",sh); if(so) so.addEventListener("click",()=>{ if(armed(so,"Tap again to sign out")) guarded(so,async()=>{ await window.APP.signoutUser(u.id); toast(`${u.name} was signed out everywhere`); so.disabled=false; so.textContent="Sign out everywhere"; }); });
+    const r2b=$("#u-reset2",sh); if(r2b) r2b.addEventListener("click",()=>{ if(armed(r2b,"Tap again to reset")) guarded(r2b,async()=>{ await window.APP.updateUser(u.id,{resetTwoStep:true}); await loadTeam(); toast(`Two-step sign-in reset for ${u.name}. They can set it up again.`); back(); }); });
     const syncRole=()=>{ $("#u-dwrap",sh).hidden=$("#u-role",sh).value!=="dealer"; }; $("#u-role",sh).addEventListener("change",syncRole); syncRole();
     $("#f",sh).addEventListener("submit",e=>{ e.preventDefault(); const btn=e.submitter||$("button[type=submit]",sh);
       const pw=$("#u-pw").value; const body={name:$("#u-name").value.trim(),role:$("#u-role").value};
@@ -2118,6 +2124,33 @@ function userForm(id,presetDealer){
       if(pw) body.password=pw; if(u) body.active=$("#u-active").checked; else body.username=$("#u-user").value.trim();
       guarded(btn,async()=>{ if(u) await window.APP.updateUser(u.id,body); else await window.APP.createUser(body); await loadTeam(); toast(u?"Account updated":"Account added. Give them their username and password."); back(); });
     });
+  }]);
+}
+function twoStepSheet(){
+  let step="loading", setup=null, codes=null;
+  show(()=>{
+    if(step==="loading") return [head("Set up two-step sign-in")+`<div class="empty"><p>Preparing…</p></div>`];
+    if(step==="codes") return [head("Save your recovery codes")+`<div class="notice warn"><p><b>Write these down or save them somewhere safe.</b> Each one works once, if you lose your phone. They won't be shown again.</p></div>
+      <pre class="stmt" id="rc-list">${esc(codes.join("\n"))}</pre><div class="actions" style="margin-top:12px"><button class="btn" type="button" id="rc-copy">Copy</button><button class="btn primary" type="button" data-close>I saved them</button></div>`,sh=>{ $("#rc-copy",sh).addEventListener("click",()=>copyText(codes.join("\n"),"Recovery codes")); }];
+    return [head("Set up two-step sign-in","After this, signing in needs your password and a 6-digit code from an app on your phone.")+`
+      <ol class="small" style="padding-left:18px"><li>Install an authenticator app on your phone, such as Google Authenticator, Microsoft Authenticator or Authy.</li>
+      <li>In the app, add an account and scan this code. On this phone, tap “Open in authenticator app” instead.</li>
+      <li>Type the 6 digits the app shows.</li></ol>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center"><img src="${esc(setup.qr)}" alt="QR code for your authenticator app" width="180" height="180" style="border:1px solid var(--line);border-radius:8px;background:#fff">
+        <div><div class="small muted">Or type this key:</div><code style="font-size:15px;user-select:all">${esc(setup.secret)}</code><div style="margin-top:8px"><a class="btn sm" href="${esc(setup.otpauth)}">Open in authenticator app</a></div></div></div>
+      <form id="tf" class="form-grid" style="margin-top:14px"><label class="f">Code from the app<input id="t-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required placeholder="123456"></label>
+        <div class="actions span"><button class="btn primary" type="submit">Turn on</button><button class="btn" type="button" data-back>Cancel</button></div></form>`,sh=>{
+      $("#tf",sh).addEventListener("submit",e=>{ e.preventDefault(); const btn=e.submitter||$("button[type=submit]",sh);
+        guarded(btn,async()=>{ const r=await window.APP.twoStepEnable($("#t-code",sh).value.trim()); codes=r.recoveryCodes; step="codes"; await loadTeam(); paintSheet(true); toast("Two-step sign-in is on. Your other devices were signed out."); }); }); }];
+  },true);
+  window.APP.twoStepSetup().then(r=>{ setup=r; step="scan"; paintSheet(true); },e=>{ toast(errMsg(e),"error"); back(); });
+}
+function twoStepOffSheet(){
+  show(()=>[head("Turn off two-step sign-in")+`<form id="f" class="form-grid"><p class="small span" style="margin:0">Signing in will need only your password again.</p>
+    <label class="f">Your password<input id="t-pw" type="password" autocomplete="current-password" required></label>
+    <div class="actions span"><button class="btn danger" type="submit">Turn off</button><button class="btn" type="button" data-back>Cancel</button></div></form>`,sh=>{
+    $("#f",sh).addEventListener("submit",e=>{ e.preventDefault(); const btn=e.submitter||$("button[type=submit]",sh);
+      guarded(btn,async()=>{ await window.APP.twoStepDisable($("#t-pw",sh).value); await loadTeam(); toast("Two-step sign-in is off"); back(); }); });
   }]);
 }
 function passwordForm(){
@@ -2159,7 +2192,7 @@ document.addEventListener("click",e=>{
        "go-orders":()=>goView("orders"),
        "catalog":()=>catalogSheet(),
        "pay-amt":()=>paymentForm(id,null,{amount:Number(a.dataset.amt).toFixed(2),deliveryId:a.dataset.did||null}),
-       "new-user":()=>userForm(), "portal-for":()=>{ const ex=(S.team||[]).find(u=>u.role==="dealer"&&u.dealerId===id); userForm(ex?ex.id:null,ex?null:id); }, "edit-user":()=>userForm(id), "change-pw":()=>passwordForm(), "logout":()=>guarded(a,async()=>{ try{ await window.APP.logout(!!a.dataset.armed); }catch(e){ if(e&&e.code==="unsent"){ a.disabled=false; armed(a,"Tap again to discard and sign out"); toast(e.userMsg,"error"); return; } throw e; } }), "held-review":()=>heldSheet(), "approvals":()=>approvalsSheet(),
+       "new-user":()=>userForm(), "portal-for":()=>{ const ex=(S.team||[]).find(u=>u.role==="dealer"&&u.dealerId===id); userForm(ex?ex.id:null,ex?null:id); }, "edit-user":()=>userForm(id), "change-pw":()=>passwordForm(), "2fa-setup":()=>twoStepSheet(), "2fa-off":()=>twoStepOffSheet(), "signout-others":()=>guarded(a,async()=>{ await window.APP.signoutOthers(); toast("Your other devices were signed out"); a.disabled=false; }), "logout":()=>guarded(a,async()=>{ try{ await window.APP.logout(!!a.dataset.armed); }catch(e){ if(e&&e.code==="unsent"){ a.disabled=false; armed(a,"Tap again to discard and sign out"); toast(e.userMsg,"error"); return; } throw e; } }), "held-review":()=>heldSheet(), "approvals":()=>approvalsSheet(),
        "load-audit":()=>guarded(a,async()=>{ S.audit=await window.APP.audit(150); render(); }),
        "go-store":()=>goView("store"), "backup-run":()=>guarded(a,async()=>{ a.textContent="Backing up…"; try{ S.backup=await window.APP.backupRun(); toast("Backup made and verified"); }catch(e){ if(e&&e.status===500) await loadBackupStatus(); throw e; } render(); }),
        "go-dealers":()=>goView("dealers"), "go-collect":()=>goView("collect"), "count":()=>countSheet(),
