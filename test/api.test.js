@@ -621,3 +621,36 @@ test("the server prices credit sales and saves each sale with its stock change (
   await owner("DELETE", "/api/c/txns/pr-s3");
   assert.equal(await stock(), 7);
 });
+
+test("behind HTTPS: redirects, HSTS and page security policy (PR-05)", async () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "ledger-https-"));
+  process.env.COOKIE_SECURE = "true";
+  const h = createApp({ dataDir: d, logger: { error() {} } });
+  delete process.env.COOKIE_SECURE;
+  const srv = h.app.listen(0); await new Promise((r) => srv.once("listening", r));
+  const port = srv.address().port;
+  // fetch() can't set Host, so use http.request.
+  const req = (method, p, headers = {}, body) => new Promise((resolve, reject) => {
+    const r = require("http").request({ host: "127.0.0.1", port, method, path: p, headers: { Host: "ledger.example.com", ...(body ? { "Content-Type": "application/json" } : {}), ...headers } }, (res) => { res.resume(); res.on("end", () => resolve({ status: res.statusCode, headers: res.headers })); });
+    r.on("error", reject); r.end(body);
+  });
+  try {
+    const plain = await req("GET", "/login");
+    assert.equal(plain.status, 308);
+    assert.equal(plain.headers.location, "https://ledger.example.com/login");
+    assert.equal((await req("POST", "/api/login", {}, "{}")).status, 403);
+    assert.equal((await req("GET", "/healthz")).status, 200, "health checks stay on HTTP");
+    const secure = await req("GET", "/login", { "X-Forwarded-Proto": "https" });
+    assert.equal(secure.status, 200);
+    assert.match(secure.headers["strict-transport-security"], /max-age=31536000/);
+    const csp = secure.headers["content-security-policy"];
+    assert.match(csp, /script-src 'self' 'sha256-[A-Za-z0-9+/=]+'/);
+    assert.doesNotMatch(csp, /script-src[^;]*unsafe-inline/);
+    assert.match((await req("GET", "/api/setup", { "X-Forwarded-Proto": "https" })).headers["content-security-policy"], /default-src 'none'/);
+  } finally { srv.close(); h.close(); fs.rmSync(d, { recursive: true, force: true }); }
+  // The server refuses to start in production without secure cookies.
+  const { spawnSync } = require("child_process");
+  const run = spawnSync(process.execPath, [path.join(__dirname, "..", "server.js")], { env: { ...process.env, NODE_ENV: "production", COOKIE_SECURE: "false", DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(), "ledger-prod-")) }, encoding: "utf8", timeout: 10000 });
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /COOKIE_SECURE=true/);
+});

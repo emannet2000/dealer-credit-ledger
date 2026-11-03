@@ -70,7 +70,8 @@ Open http://localhost:3000. The first visit asks you to create the **owner** acc
 |---|---|---|
 | `PORT` | `3000` | Web server port |
 | `DATA_DIR` | `./data` | Where the database, photos and daily backups are stored. **Back up this folder.** |
-| `COOKIE_SECURE` | `false` | Set to `true` when the site uses HTTPS |
+| `COOKIE_SECURE` | `false` | Set to `true` when the site uses HTTPS. Also turns on the HTTPS redirect and HSTS. **Required when `NODE_ENV=production`.** |
+| `ALLOW_INSECURE_HTTP` | — | Set to `true` only to try the production build on a local network without HTTPS. Never on a public server. |
 | `TZ` | `Asia/Manila` | Time zone for "today", due dates and staff edit limits |
 | `BACKUP_KEEP` | `30` | Number of daily backups to keep |
 | `BACKUP_SYNC_CMD` | — | Optional command run after each daily backup. The finished file is passed in `BACKUP_FILE`, e.g. `rclone copy "$BACKUP_FILE" remote:ledger-backups` |
@@ -102,10 +103,30 @@ docker build -t dealer-ledger .
 ```
 
 ```bash
-docker run -d -p 3000:3000 -v ledger-data:/data --name ledger dealer-ledger
+docker run -d -p 127.0.0.1:3000:3000 -e COOKIE_SECURE=true -v ledger-data:/data --name ledger dealer-ledger
 ```
 
+The image sets `NODE_ENV=production`, so it refuses to start without `COOKIE_SECURE=true`.
+
 On Railway, Render or Fly.io, attach a volume mounted at `/data`.
+
+## Going live (HTTPS)
+
+The app must be served over HTTPS before real dealers and money go into it. Passwords and session cookies are otherwise sent in plain text, and phones can't install the app or record payments offline.
+
+1. Point a domain at the server, e.g. `ledger.example.com`.
+2. Install [Caddy](https://caddyserver.com) and use this `/etc/caddy/Caddyfile`. Caddy gets and renews the certificate automatically and redirects HTTP to HTTPS:
+
+   ```
+   ledger.example.com {
+       reverse_proxy 127.0.0.1:3000
+   }
+   ```
+
+3. In `.env`, set `COOKIE_SECURE=true` and `NODE_ENV=production`, and keep the app listening only on `127.0.0.1` (the Docker example above does this).
+4. Restart the app and open `https://ledger.example.com`. Check that `http://` redirects to `https://`.
+
+With `COOKIE_SECURE=true` the app also redirects any plain-HTTP request it receives to HTTPS and sends `Strict-Transport-Security`. Every page is served with a Content-Security-Policy that allows only the app's own scripts and Google Fonts. The app trusts one proxy in front of it for `X-Forwarded-Proto`; don't expose port 3000 directly.
 
 ## Move your data from the claude.ai version
 

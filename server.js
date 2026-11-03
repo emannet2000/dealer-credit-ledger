@@ -11,6 +11,13 @@ if (fs.existsSync(envFile)) {
 }
 process.env.TZ = process.env.TZ || "Asia/Manila";
 
+// PR-05: in production the site must be behind HTTPS with secure cookies.
+if (process.env.NODE_ENV === "production" && String(process.env.COOKIE_SECURE) !== "true" && process.env.ALLOW_INSECURE_HTTP !== "true") {
+  console.error("Refusing to start: NODE_ENV=production needs COOKIE_SECURE=true behind an HTTPS proxy. See README, \"Going live\".");
+  console.error("For a local trial only, set ALLOW_INSECURE_HTTP=true.");
+  process.exit(1);
+}
+
 const { createApp } = require("./lib/app");
 const { app, close, backupNow, dataDir } = createApp({ dataDir: process.env.DATA_DIR || path.join(__dirname, "data") });
 const port = Number(process.env.PORT) || 3000;
