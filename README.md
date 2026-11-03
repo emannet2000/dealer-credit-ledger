@@ -12,19 +12,22 @@ It runs on Node.js with a built-in SQLite database. There's no separate database
   - Promo prices with start and end dates, applied automatically to sales and online orders dated inside the promo. You choose whether the dealer discount also applies to the promo price.
   - **Update catalog:** paste the new price list from Excel, Google Sheets or a CSV. You get a preview of new products, price changes (old → new), promos and products missing from the new list, then apply it all at once. Dealer prices are recalculated and every SRP change is saved in the product's price history.
 - **Full or partial payments:** quick buttons for full balance, overdue only or the oldest delivery, or type any amount. A live preview shows exactly which DRs the payment settles and what's left. Receipts show "Full payment" or "Partial payment" and what the payment was applied to.
-- **Automatic numbers:** DR-00001 for sales, OR-00001 for payments, RT-00001 for returns. They are assigned by the server, so two people can never get the same number.
+- **Adjustments and write-offs:** add a debit or credit that is not a sale, payment or return, or write off bad debt with a required reason. Both are owner/editor only, keep the audit trail, and show correctly in balances, receipts and reports.
+- **Automatic numbers:** DR-00001 for sales, OR-00001 for payments, RT-00001 for returns, ADJ-00001 for adjustments and WO-00001 for write-offs. They are assigned by the server, so two people can never get the same number.
 - **Payments** (Cash, GCash, Maya, bank transfer, check) applied to the oldest unpaid delivery first.
-- **Returns,** with or without putting items back in stock.
+- **Returns,** with or without putting items back in stock. Link a return to a DR and the app caps quantities at what was delivered and not already returned.
 - **Opening balances** for dealers who already owe money.
 - **Credit control:** credit limits, automatic credit hold for dealers over 60 days late, and owner approval to release anyway.
+- **Cost and gross profit:** save what you paid per product (owner/editor only) and see profit per piece, cost of goods sold, gross profit and margin in the product list and reports. Sale lines snapshot the cost so old profit does not change.
+- **Stock reservation and backorders:** open online orders hold stock, so two dealers are not promised the same units. Orders that cannot be filled are flagged as backorders with the short items listed. Stock cannot go below zero unless you turn on backorders in Store settings.
 - **Credit history per dealer:** rating (A–D), on-time payment rate, average days to pay, worst delay, last 6 months, a payment record per delivery, and a log of credit limit changes.
 - **Collections list** with a ready-to-send Taglish reminder message for Messenger, Viber or SMS.
 - **Online orders from dealers:** dealers order from the portal catalog with a pickup date and note. Orders show up live in the **Orders** tab, where you check stock, move them through Preparing → Ready for pickup, then release them as a credit sale in one tap with items and discount already filled in. Dealers see each status change.
 - **Dealer portal:** each dealer can have a login that shows only their own balance, due dates, credit limit, receipts, payment history, orders and your catalog with their price. They can't see other dealers, your costs or your stock counts.
-- **Receipts:** a delivery receipt (DR), an acknowledgement receipt for payments, and a return slip, with signature lines and the balance after each transaction. Print them or copy them as text. One opens automatically after each sale or payment.
+- **Receipts:** a delivery receipt (DR), an acknowledgement receipt for payments, a return slip, an adjustment note and a write-off note, with signature lines and the balance after each transaction. Print them or copy them as text. One opens automatically after each sale or payment.
 - **12-month chart** of credit sales vs. collections in Reports.
 - **Inventory:** stock in, damaged or lost stock, monthly stock count, low-stock alerts, product photos.
-- **Reports** by period, product, dealer and payment method, with CSV export.
+- **Reports** by period, product, dealer and payment method, with cost, gross profit, adjustments, write-offs and CSV export.
 - **Team accounts** with roles. The server enforces what each role can do:
 
   | Role | Can do |
@@ -36,7 +39,7 @@ It runs on Node.js with a built-in SQLite database. There's no separate database
   | Dealer portal | One dealer's own balance, receipts, history and catalog, plus placing and cancelling their own new orders |
 
 - **Activity log** of every sign-in and change, showing who made it and when.
-- **Backups:** an automatic daily copy of the database, plus a downloadable backup file and restore from the Store tab.
+- **Backups:** an automatic daily copy of the database, an optional offsite copy after each backup, plus a downloadable backup file, a full backup with accounts and photos, and restore from the Store tab.
 - **Live updates:** changes appear on everyone's screen within a second.
 - **Phone-friendly:** a bottom navigation bar, a big **+** button for new sale, payment, return, stock in, dealer or product, and quick search (**Ctrl+K** or **/**) across dealers, products, DR/OR numbers and orders.
 
@@ -70,6 +73,7 @@ Open http://localhost:3000. The first visit asks you to create the **owner** acc
 | `COOKIE_SECURE` | `false` | Set to `true` when the site uses HTTPS |
 | `TZ` | `Asia/Manila` | Time zone for "today", due dates and staff edit limits |
 | `BACKUP_KEEP` | `30` | Number of daily backups to keep |
+| `BACKUP_SYNC_CMD` | — | Optional command run after each daily backup. The finished file is passed in `BACKUP_FILE`, e.g. `rclone copy "$BACKUP_FILE" remote:ledger-backups` |
 
 ## Put it online
 
@@ -89,7 +93,7 @@ cp .env.example .env
 npx pm2 start server.js --name ledger && npx pm2 save
 ```
 
-Put Caddy or Nginx in front for HTTPS (Caddy gets a free certificate automatically), then set `COOKIE_SECURE=true`.
+Put Caddy or Nginx in front for HTTPS (Caddy gets a free certificate automatically), then set `COOKIE_SECURE=true`. HTTPS is also required for installing the app on phones and recording payments offline.
 
 **Option B: Docker** (works on Railway, Render, Fly.io or your own server)
 
@@ -112,7 +116,7 @@ On Railway, Render or Fly.io, attach a volume mounted at `/data`.
 npm run import -- path/to/ledger-backup-YYYY-MM-DD.json
 ```
 
-You can also sign in as the owner and use **Store → Restore from backup**. Photos aren't inside backup files, so add them again from the Products tab.
+You can also sign in as the owner and use **Store → Restore from backup**. Photos aren't inside the older JSON backups; use **Download full backup** to include photos and team accounts, or add photos again from the Products tab.
 
 ## Forgot a password
 
@@ -125,6 +129,8 @@ npm run reset-password -- <username> <new-password>
 ## Backups
 
 - An automatic copy is saved every day in `data/backups/` (the last 30 are kept).
+- Set `BACKUP_SYNC_CMD` to copy each finished backup to another disk or cloud folder automatically.
+- **Download full backup** in Store includes dealers, products, transactions, settings, team accounts (with password hashes) and product photos. Keep it somewhere safe; anyone with the file can read the data.
 - Also copy the whole `data/` folder somewhere else regularly (Google Drive, another computer). A copy kept only on the same server won't help if that server is lost.
 
 ## Tests
@@ -133,12 +139,13 @@ npm run reset-password -- <username> <new-password>
 npm test
 ```
 
-The tests cover sign-in, roles and permissions, DR/OR numbering, atomic stock changes, credit holds, photo uploads, the activity log, backups, database upgrades, dealer portal privacy, online-order status rules, and promo and per-product discount pricing.
+The tests cover sign-in, roles and permissions, DR/OR numbering, atomic stock changes, credit holds, photo uploads, the activity log, backups, database upgrades, dealer portal privacy, online-order status rules, promo and per-product discount pricing, adjustments and write-offs, cost-price privacy, negative-stock protection, stock reservation and backorders, sale-linked return limits, full backup/restore and the offsite backup hook.
 
 ## Project layout
 
 ```
 server.js            starts the web server and daily backups
+REQUIREMENTS.md      the 70 functional requirements and acceptance criteria
 lib/app.js           API, sign-in, roles and business rules
 lib/credit.js        balance and overdue rules (oldest delivery paid first)
 lib/db.js            SQLite database and migrations
