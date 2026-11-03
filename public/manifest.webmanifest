@@ -1,0 +1,15 @@
+{
+  "name": "Dealer Credit Ledger",
+  "short_name": "Ledger",
+  "description": "Dealer credit, collections and inventory. Payments can be recorded offline and sync later.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f6f5",
+  "theme_color": "#0d6b5c",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

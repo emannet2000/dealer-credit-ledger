@@ -6,6 +6,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { createApp } = require("../lib/app");
+const { txnEffect } = require("../lib/credit");
 const Database = require("better-sqlite3");
 const { openDb } = require("../lib/db");
 
@@ -225,4 +226,340 @@ test("promos and per-product discounts price online orders; staff can't change t
 test("automatic backup writes a database copy", async () => {
   const f = await backupNow();
   assert.ok(fs.statSync(f).size > 0);
+});
+
+test("adjustments and write-offs change the balance and are admin-only", async () => {
+  await owner("PUT", "/api/c/dealers/ad1", { data: { name: "Adjust Dealer", creditLimit: 10000, terms: 30 } });
+  await owner("PUT", "/api/c/txns/ads1", { data: { type: "sale", dealerId: "ad1", date: day(0), dueDate: day(30), items: [], amount: 1000 } });
+  assert.equal((await staff("PUT", "/api/c/txns/ada1", { data: { type: "adjustment", dealerId: "ad1", direction: "debit", amount: 10, reason: "test" } })).status, 403);
+  assert.equal((await staff("PUT", "/api/c/txns/adw1", { data: { type: "writeoff", dealerId: "ad1", amount: 10, reason: "test" } })).status, 403);
+  const debit = await owner("PUT", "/api/c/txns/ada1", { data: { type: "adjustment", dealerId: "ad1", direction: "debit", amount: 200, reason: "Freight" } });
+  assert.equal(debit.status, 200);
+  assert.equal(debit.data.data.no, "ADJ-00001");
+  const credit = await owner("PUT", "/api/c/txns/ada2", { data: { type: "adjustment", dealerId: "ad1", direction: "credit", amount: 50, reason: "Goodwill" } });
+  assert.equal(credit.status, 200);
+  assert.equal(credit.data.data.no, "ADJ-00002");
+  const wo = await owner("PUT", "/api/c/txns/adw1", { data: { type: "writeoff", dealerId: "ad1", amount: 300, reason: "Unreachable" } });
+  assert.equal(wo.status, 200);
+  assert.equal(wo.data.data.no, "WO-00001");
+  assert.equal((await owner("PUT", "/api/c/txns/adx1", { data: { type: "adjustment", dealerId: "ad1", amount: 5, reason: "no direction" } })).status, 400);
+  assert.equal((await owner("PUT", "/api/c/txns/adx2", { data: { type: "writeoff", dealerId: "ad1", amount: 5 } })).status, 400);
+  const tx = (await owner("GET", "/api/c/txns")).data.filter((t) => t.data.dealerId === "ad1").map((t) => t.data);
+  assert.equal(tx.reduce((a, t) => a + txnEffect(t), 0), 850, "sale 1000 + debit 200 − credit 50 − write-off 300");
+  const voided = { ...wo.data.data, voided: true };
+  assert.equal(txnEffect(voided), 0, "voided records do not affect the balance");
+});
+
+test("product cost is admin-only and is kept for profit reports", async () => {
+  await owner("PUT", "/api/c/products/p6", { data: { name: "Costed item", dealerPrice: 100, srp: 150, cost: 40, stock: 10 } });
+  await staff("PUT", "/api/c/products/p6", { data: { name: "Costed item", dealerPrice: 100, srp: 150, cost: 1 } });
+  const p6 = (await owner("GET", "/api/c/products")).data.find((p) => p.id === "p6").data;
+  assert.equal(p6.cost, 40, "staff cannot change the cost price");
+  await staff("PUT", "/api/c/products/p6", { data: { name: "Costed item", dealerPrice: 100, srp: 150 } });
+  assert.equal((await owner("GET", "/api/c/products")).data.find((p) => p.id === "p6").data.cost, 40, "cost survives a staff edit");
+  assert.equal((await owner("PUT", "/api/c/products/p6", { data: { name: "Costed item", dealerPrice: 100, srp: 150, cost: 55 } })).data.data.cost, 55, "admins can set cost");
+  assert.equal((await owner("PUT", "/api/c/products/p6", { data: { name: "Costed item", dealerPrice: 100, srp: 150, cost: "" } })).data.data.cost, null, "blank cost is cleared");
+});
+
+test("stock cannot go below zero unless backorders are allowed", async () => {
+  await owner("PUT", "/api/c/products/p7", { data: { name: "Scarce item", dealerPrice: 10, srp: 20, stock: 2 } });
+  const denied = await staff("POST", "/api/stock", { deltas: { p7: -3 } });
+  assert.equal(denied.status, 409);
+  assert.equal(denied.data.code, "insufficient_stock");
+  assert.equal((await owner("GET", "/api/c/products")).data.find((p) => p.id === "p7").data.stock, 2);
+  const settings = (await owner("GET", "/api/c/settings")).data.find((s) => s.id === "store").data;
+  await owner("PUT", "/api/c/settings/store", { data: { ...settings, allowNegativeStock: true } });
+  assert.equal((await staff("POST", "/api/stock", { deltas: { p7: -3 } })).data.stock.p7, -1);
+  await owner("PUT", "/api/c/settings/store", { data: { ...settings, allowNegativeStock: false } });
+});
+
+test("online orders reserve stock and flag backorders, credit holds and over-limit orders", async () => {
+  await owner("PUT", "/api/c/dealers/ob1", { data: { name: "Order Dealer", creditLimit: 1000, terms: 30 } });
+  await owner("PUT", "/api/c/products/p8", { data: { name: "Reserved item", dealerPrice: 50, srp: 100, stock: 5 } });
+  await owner("PUT", "/api/c/products/p9", { data: { name: "Big item", dealerPrice: 1000, srp: 1000, stock: 0 } });
+  const first = await owner("PUT", "/api/c/orders/bko1", { data: { dealerId: "ob1", status: "new", items: [{ productId: "p8", qty: 4 }] } });
+  assert.equal(first.status, 200);
+  assert.equal(first.data.data.backorder, false);
+  assert.deepEqual(first.data.data.shortItems, []);
+  const second = await owner("PUT", "/api/c/orders/bko2", { data: { dealerId: "ob1", status: "new", items: [{ productId: "p8", qty: 4 }] } });
+  assert.equal(second.data.data.backorder, true, "4 more cannot fit in the 1 unit left");
+  assert.deepEqual(second.data.data.shortItems, [{ productId: "p8", name: "Reserved item", qty: 4, available: 1 }]);
+  const over = await owner("PUT", "/api/c/orders/bko3", { data: { dealerId: "ob1", status: "new", items: [{ productId: "p9", qty: 2 }] } });
+  assert.equal(over.data.data.overLimit, true);
+  const held = await owner("PUT", "/api/c/orders/bko4", { data: { dealerId: "late", status: "new", items: [{ productId: "p8", qty: 1 }] } });
+  assert.equal(held.data.data.creditHold, true, "late dealer is over the hold threshold");
+  const portal = client();
+  await portal("POST", "/api/login", { username: "maria", password: "dealerpass1" });
+  const reservedProduct = (await portal("GET", "/api/c/products")).data.find((p) => p.id === "p8");
+  assert.equal(reservedProduct.data.available, false, "dealer sees stock held by open orders as unavailable");
+  assert.equal(reservedProduct.data.stock, undefined, "stock numbers stay hidden from dealers");
+});
+
+test("returns linked to a delivery cannot exceed what was delivered", async () => {
+  await owner("PUT", "/api/c/txns/rs1", { data: { type: "sale", dealerId: "d1", date: day(0), dueDate: day(30), items: [{ productId: "p1", name: "Soap", qty: 5, price: 100 }], subtotal: 500, amount: 500 } });
+  const one = await owner("PUT", "/api/c/txns/rr1", { data: { type: "return", dealerId: "d1", saleId: "rs1", date: day(0), restock: true, items: [{ productId: "p1", name: "Soap", qty: 3, price: 100 }], amount: 300 } });
+  assert.equal(one.status, 200);
+  assert.equal(one.data.data.saleId, "rs1");
+  const tooMany = await owner("PUT", "/api/c/txns/rr2", { data: { type: "return", dealerId: "d1", saleId: "rs1", date: day(0), restock: true, items: [{ productId: "p1", name: "Soap", qty: 3, price: 100 }], amount: 300 } });
+  assert.equal(tooMany.status, 400);
+  assert.match(tooMany.data.message, /Only 2/);
+  const rest = await owner("PUT", "/api/c/txns/rr2", { data: { type: "return", dealerId: "d1", saleId: "rs1", date: day(0), restock: true, items: [{ productId: "p1", name: "Soap", qty: 2, price: 100 }], amount: 200 } });
+  assert.equal(rest.status, 200);
+  assert.equal((await owner("PATCH", "/api/c/txns/rr2", { data: { items: [{ productId: "p1", name: "Soap", qty: 3, price: 100 }], amount: 300 } })).status, 400, "edits are capped too");
+  assert.equal((await owner("PUT", "/api/c/txns/rr3", { data: { type: "return", dealerId: "late", saleId: "rs1", date: day(0), items: [{ productId: "p1", name: "Soap", qty: 1, price: 100 }], amount: 100 } })).status, 400, "wrong dealer");
+});
+
+test("full backups include accounts and photos and restore in one request", async () => {
+  await owner("PUT", "/api/c/dealers/bk1", { data: { name: "Backup Dealer", creditLimit: 100, terms: 30 } });
+  const full = await owner("GET", "/api/backup/full");
+  assert.equal(full.status, 200);
+  assert.equal(full.data.app, "dealer-credit-ledger");
+  assert.ok(full.data.collections.dealers.some((d) => d.id === "bk1"));
+  assert.ok(full.data.users.some((u) => u.password_hash), "account hashes are included");
+  assert.ok(full.data.assets.every((a) => typeof a.data === "string"), "photos are embedded");
+  assert.equal((await staff("GET", "/api/backup/full")).status, 403);
+  assert.equal((await owner("DELETE", "/api/c/dealers/bk1")).status, 200);
+  assert.ok(!(await owner("GET", "/api/c/dealers")).data.some((d) => d.id === "bk1"));
+  const restored = await owner("POST", "/api/backup/restore", { backup: full.data, replace: true });
+  assert.equal(restored.status, 200);
+  assert.ok(restored.data.docs > 0);
+  assert.ok((await owner("GET", "/api/c/dealers")).data.some((d) => d.id === "bk1"), "deleted record is back");
+  assert.equal((await owner("POST", "/api/backup/restore", { backup: { app: "nope" } })).status, 400);
+});
+
+test("the offsite backup hook receives the finished backup file", async () => {
+  const marker = path.join(dir, "offsite-copy.db");
+  process.env.BACKUP_SYNC_CMD = `cp "$BACKUP_FILE" "${marker}"`;
+  try {
+    const f = await backupNow();
+    assert.ok(fs.existsSync(marker), "sync command ran");
+    assert.ok(fs.statSync(marker).size > 0);
+    assert.ok(fs.statSync(f).size > 0);
+  } finally {
+    delete process.env.BACKUP_SYNC_CMD;
+  }
+});
+
+test("dealer CRM: stages, contact log and follow-ups", async () => {
+  // New dealers default to the "dealer" stage; unknown stages and bad emails are rejected.
+  assert.equal((await owner("PUT", "/api/c/dealers/crm0", { data: { name: "Old Style" } })).data.data.stage, "dealer");
+  assert.equal((await owner("PUT", "/api/c/dealers/crm1", { data: { name: "Paula Prospect", stage: "maybe" } })).status, 400);
+  assert.equal((await owner("PUT", "/api/c/dealers/crm1", { data: { name: "Paula Prospect", stage: "lead", email: "nope" } })).status, 400);
+  const lead = await staff("PUT", "/api/c/dealers/crm1", { data: { name: "Paula Prospect", stage: "lead", tags: [" VIP ", "VIP", ""], email: "paula@example.com" } });
+  assert.equal(lead.status, 200);
+  assert.deepEqual(lead.data.data.tags, ["VIP"]);
+  assert.equal(lead.data.data.stageHistory.at(-1).to, "lead");
+
+  // Contact log entries need a real dealer, a known kind and a date.
+  assert.equal((await staff("PUT", "/api/c/interactions/i0", { data: { dealerId: "ghost", kind: "call", date: day(0) } })).status, 400);
+  assert.equal((await staff("PUT", "/api/c/interactions/i0", { data: { dealerId: "crm1", kind: "smoke", date: day(0) } })).status, 400);
+  assert.equal((await staff("PUT", "/api/c/interactions/i0", { data: { dealerId: "crm1", kind: "call" } })).status, 400);
+  const call = await owner("PUT", "/api/c/interactions/i1", { data: { dealerId: "crm1", kind: "call", date: day(0), outcome: "Interested", note: "Call back", followUp: day(2) } });
+  assert.equal(call.status, 200);
+  assert.equal(call.data.data.followUpDone, false);
+  assert.equal((await viewer("PUT", "/api/c/interactions/i2", { data: { dealerId: "crm1", kind: "note", date: day(0) } })).status, 403);
+
+  // Staff can tick off someone else's follow-up but not rewrite their notes.
+  const done = await staff("PATCH", "/api/c/interactions/i1", { data: { followUpDone: true, note: "rewritten" } });
+  assert.equal(done.status, 200);
+  assert.equal(done.data.data.followUpDone, true);
+  assert.equal(done.data.data.note, "Call back");
+  assert.equal((await staff("DELETE", "/api/c/interactions/i1")).status, 403);
+
+  // Dealer portal accounts never see CRM data.
+  const portal = client();
+  await portal("POST", "/api/login", { username: "maria", password: "dealerpass1" });
+  assert.deepEqual((await portal("GET", "/api/c/interactions")).data, []);
+  const own = (await portal("GET", "/api/c/dealers")).data[0].data;
+  assert.equal(own.stage, undefined);
+  assert.equal(own.tags, undefined);
+
+  // The first credit sale turns a prospect into a dealer.
+  const sale = await owner("PUT", "/api/c/txns/crm-s1", { data: { type: "sale", dealerId: "crm1", date: day(0), dueDate: day(30), amount: 100, items: [] } });
+  assert.equal(sale.status, 200);
+  const d = (await owner("GET", "/api/c/dealers")).data.find((x) => x.id === "crm1").data;
+  assert.equal(d.stage, "dealer");
+  assert.equal(d.stageHistory.at(-1).reason, "first sale");
+
+  // CRM records are part of the full backup.
+  const full = (await owner("GET", "/api/backup/full")).data;
+  assert.ok(full.collections.interactions.some((r) => r.id === "i1"));
+});
+
+test("product pictures can be downloaded from an internet link, safely", async () => {
+  const { isBlockedAddress, pageImage, unwrap } = require("../lib/fetch-image");
+  for (const ip of ["127.0.0.1", "10.1.2.3", "172.20.0.1", "192.168.1.5", "169.254.169.254", "100.64.0.1", "0.0.0.0", "::1", "fd00::1", "fe80::1", "::ffff:127.0.0.1", "::ffff:10.0.0.1"])
+    assert.equal(isBlockedAddress(ip), true, ip);
+  for (const ip of ["8.8.8.8", "142.250.72.14", "2606:4700:4700::1111"]) assert.equal(isBlockedAddress(ip), false, ip);
+  assert.equal(pageImage('<meta content="/img/a.jpg?x=1&amp;y=2" property="og:image">', "https://shop.example/p/1"), "https://shop.example/img/a.jpg?x=1&y=2");
+  assert.equal(unwrap("https://www.google.com/imgres?imgurl=https%3A%2F%2Fcdn.example%2Fa.png&tbnid=x"), "https://cdn.example/a.png");
+
+  // Private, local and non-web links are refused (the default).
+  for (const url of ["http://127.0.0.1/a.png", "http://localhost/a.png", "http://10.0.0.5/a.png", "http://[::1]/a.png", "http://169.254.169.254/latest/meta-data", "file:///etc/passwd", "ftp://example.com/a.png", "https://user:pw@example.com/a.png", "https://example.com:8443/a.png", "not a link"]) {
+    const r = await owner("POST", "/api/assets/fetch", { url });
+    assert.equal(r.status, 400, url);
+  }
+  assert.equal((await viewer("POST", "/api/assets/fetch", { url: "https://example.com/a.png" })).status, 403);
+
+  // A local test site stands in for the internet.
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
+  const http = require("http");
+  const site = http.createServer((req, res) => {
+    if (req.url === "/a.png") { res.writeHead(200, { "Content-Type": "application/octet-stream" }); return res.end(png); }
+    if (req.url === "/moved") { res.writeHead(302, { Location: "/a.png" }); return res.end(); }
+    if (req.url === "/page") { res.writeHead(200, { "Content-Type": "text/html" }); return res.end('<html><head><meta property="og:image" content="/a.png"></head></html>'); }
+    if (req.url === "/bare") { res.writeHead(200, { "Content-Type": "text/html" }); return res.end("<html>no picture</html>"); }
+    if (req.url === "/fake.png") { res.writeHead(200, { "Content-Type": "image/png" }); return res.end("<svg onload=alert(1)>"); }
+    if (req.url === "/huge") { res.writeHead(200, { "Content-Type": "image/jpeg" }); const chunk = Buffer.alloc(1024 * 1024, 0xff); let n = 0; const w = () => { while (n < 10 && res.write(chunk)) n++; if (n >= 10) res.end(); else { n++; res.once("drain", w); } }; return w(); }
+    res.writeHead(404); res.end();
+  });
+  site.listen(0); await new Promise((r) => site.once("listening", r));
+  const at = `http://127.0.0.1:${site.address().port}`;
+  process.env.IMAGE_FETCH_ALLOW_PRIVATE = "1";
+  try {
+    const direct = await owner("POST", "/api/assets/fetch", { url: at + "/a.png" });
+    assert.equal(direct.status, 200);
+    assert.equal(direct.data.contentType, "image/png", "type comes from the file, not the header");
+    const blob = await owner("GET", "/_blob/" + direct.data.id);
+    assert.equal(blob.status, 200);
+    assert.equal((await staff("POST", "/api/assets/fetch", { url: at + "/moved" })).data.source, at + "/a.png", "redirects are followed");
+    assert.equal((await owner("POST", "/api/assets/fetch", { url: at + "/page" })).data.source, at + "/a.png", "product page picture is used");
+    assert.equal((await owner("POST", "/api/assets/fetch", { url: at + "/bare" })).status, 415);
+    assert.equal((await owner("POST", "/api/assets/fetch", { url: at + "/fake.png" })).status, 415, "non-images are refused");
+    assert.equal((await owner("POST", "/api/assets/fetch", { url: at + "/missing" })).status, 502);
+    assert.equal((await owner("POST", "/api/assets/fetch", { url: at + "/huge" })).status, 413);
+    const log = (await owner("GET", "/api/audit")).data;
+    assert.ok(JSON.stringify(log).includes(at + "/a.png"), "the source link is in the activity log");
+  } finally {
+    delete process.env.IMAGE_FETCH_ALLOW_PRIVATE;
+    site.close();
+  }
+});
+
+test("payments recorded offline sync once, and conflicts are held for review", async () => {
+  await owner("PUT", "/api/c/dealers/off1", { data: { name: "Field Dealer", terms: 30 } });
+  const pay = (key, extra = {}) => ({ data: { type: "payment", dealerId: "off1", date: day(-1), amount: 250, method: "Cash", no: "OR-OFF", offline: { key, recordedAt: Date.now() - 3600e3 }, ...extra } });
+  const first = await staff("PUT", "/api/c/txns/offk1", pay("offk1"));
+  assert.equal(first.status, 200);
+  assert.equal(first.data.data.offline.key, "offk1");
+  assert.ok(first.data.data.offline.syncedAt >= first.data.data.offline.recordedAt);
+  // The phone lost the reply and sends it again: nothing new is recorded.
+  const again = await staff("PUT", "/api/c/txns/offk1", pay("offk1"));
+  assert.equal(again.status, 200);
+  assert.equal(again.data.duplicate, true);
+  const txns = (await owner("GET", "/api/c/txns")).data.filter((t) => t.data.dealerId === "off1");
+  assert.equal(txns.length, 1, "recorded exactly once");
+  assert.equal(txns[0].version, 1);
+  // Viewers can't probe records through the duplicate shortcut.
+  assert.equal((await viewer("PUT", "/api/c/txns/offk1", pay("offk1"))).status, 403);
+  // Only new payments can carry an offline key.
+  assert.equal((await staff("PUT", "/api/c/txns/offk2", pay("offk2", { type: "sale", dueDate: day(20), items: [] }))).status, 400);
+  assert.equal((await staff("PUT", "/api/c/txns/offk3", pay("bad key!"))).status, 400);
+  // The dealer was archived while the collector was offline: held until an owner or editor confirms.
+  await owner("PATCH", "/api/c/dealers/off1", { data: { active: false } });
+  const held = await staff("PUT", "/api/c/txns/offk4", pay("offk4"));
+  assert.equal(held.status, 409);
+  assert.equal(held.data.code, "needs_review");
+  assert.equal((await staff("PUT", "/api/c/txns/offk4", pay("offk4", { offline: { key: "offk4", recordedAt: Date.now(), confirmed: true } }))).status, 409, "staff can't confirm");
+  const ok = await owner("PUT", "/api/c/txns/offk4", pay("offk4", { offline: { key: "offk4", recordedAt: Date.now(), confirmed: true } }));
+  assert.equal(ok.status, 200);
+  assert.equal(ok.data.data.offline.confirmed, true);
+  // The installable app shell is served.
+  assert.equal((await anon("GET", "/manifest.webmanifest")).data.start_url, "/");
+  assert.match(String((await anon("GET", "/sw.js")).data), /dcl-shell/);
+});
+
+test("a payment can be applied to the deliveries the dealer chose", async () => {
+  const { settle } = require("../lib/credit");
+  await owner("PUT", "/api/c/dealers/al1", { data: { name: "Allocating Dealer", terms: 30 } });
+  const sale = (id, date, amount, no) => owner("PUT", "/api/c/txns/" + id, { data: { type: "sale", opening: true, dealerId: "al1", date, dueDate: date, amount, items: [], no } });
+  await sale("al-a", day(-60), 100, "DR-A1");
+  await sale("al-b", day(-30), 200, "DR-B1");
+  await sale("al-c", day(-10), 300, "DR-C1");
+  const pay = (id, amount, alloc, extra = {}) => staff("PUT", "/api/c/txns/" + id, { data: { type: "payment", dealerId: "al1", date: day(0), amount, method: "Cash", ...(alloc ? { alloc } : {}), ...extra } });
+
+  // Rejected: unknown delivery, more than is unpaid, more than the payment, non-payments.
+  assert.equal((await pay("al-p0", 50, [{ id: "nope", amount: 50 }])).status, 400);
+  assert.equal((await pay("al-p0", 500, [{ id: "al-b", amount: 250 }])).status, 400);
+  assert.equal((await pay("al-p0", 100, [{ id: "al-b", amount: 150 }])).status, 400);
+  assert.equal((await pay("al-p0", 100, [{ id: "al-b", amount: 50 }, { id: "al-b", amount: 50 }])).status, 400, "no repeats");
+  assert.equal((await owner("PUT", "/api/c/txns/al-x", { data: { type: "adjustment", direction: "credit", dealerId: "al1", date: day(0), amount: 10, alloc: [{ id: "al-b", amount: 10 }] } })).status, 400);
+
+  // 250 paid: 200 for DR-B1 as chosen, the other 50 goes to the oldest (DR-A1).
+  const p1 = await pay("al-p1", 250, [{ id: "al-b", amount: 200 }]);
+  assert.equal(p1.status, 200);
+  assert.deepEqual(p1.data.data.alloc, [{ id: "al-b", no: "DR-B1", amount: 200 }]);
+  const docs = () => owner("GET", "/api/c/txns").then((r) => r.data.filter((d) => d.data.dealerId === "al1").map((d) => ({ ...d.data, _id: d.id })));
+  let st = settle(await docs());
+  assert.deepEqual(st.open.map((o) => [o.id, o.rem]), [["al-a", 50], ["al-c", 300]]);
+
+  // DR-B1 is now paid, so it can't be chosen again.
+  assert.equal((await pay("al-p2", 10, [{ id: "al-b", amount: 10 }])).status, 400);
+
+  // Voiding the payment releases its allocation.
+  await owner("PATCH", "/api/c/txns/al-p1", { data: { voided: true, voidReason: "test" } });
+  st = settle(await docs());
+  assert.deepEqual(st.open.map((o) => [o.id, o.rem]), [["al-a", 100], ["al-b", 200], ["al-c", 300]]);
+});
+
+test("blocked staff sales go to the owner as approval requests", async () => {
+  await owner("PUT", "/api/c/dealers/ap1", { data: { name: "Hold Harriet", creditLimit: 1000, terms: 15 } });
+  await owner("PUT", "/api/c/txns/ap-old", { data: { type: "sale", opening: true, dealerId: "ap1", date: day(-120), dueDate: day(-100), amount: 300, items: [], no: "DR-AP0" } });
+  await owner("PUT", "/api/c/products/ap-p", { data: { name: "Approval Soap", dealerPrice: 50, srp: 70, stock: 20 } });
+  const stock = async () => (await owner("GET", "/api/c/products")).data.find((p) => p.id === "ap-p").data.stock;
+  const before = await stock();
+  const sale = { type: "sale", dealerId: "ap1", date: day(0), dueDate: day(15), amount: 100, items: [{ productId: "ap-p", name: "Approval Soap", qty: 2, price: 50 }], no: "DR-FAKE", override: { by: "me" } };
+
+  // Staff are blocked, then send the sale for approval with a reason.
+  const blocked = await staff("PUT", "/api/c/txns/ap-s1", { data: sale });
+  assert.equal(blocked.status, 409);
+  assert.equal(blocked.data.code, "credit_hold");
+  assert.equal((await staff("POST", "/api/approvals", { sale, reason: "" })).status, 400, "reason required");
+  assert.equal((await viewer("POST", "/api/approvals", { sale, reason: "please" })).status, 403);
+  const req1 = await staff("POST", "/api/approvals", { sale, reason: "Dealer promised to pay Friday" });
+  assert.equal(req1.status, 200);
+  assert.equal(req1.data.data.status, "pending");
+  assert.equal(req1.data.data.block.hold, true);
+  assert.equal(req1.data.data.sale.override, undefined, "staff can't pre-approve");
+  assert.equal(await stock(), before, "pending requests don't touch stock");
+  assert.ok(!(await owner("GET", "/api/c/txns")).data.some((t) => t.data.dealerId === "ap1" && !t.data.opening), "or the balance");
+
+  // Requests can't be edited directly, and staff can't decide them.
+  assert.equal((await staff("PATCH", "/api/c/approvals/" + req1.data.id, { data: { status: "approved" } })).status, 403);
+  assert.equal((await staff("POST", `/api/approvals/${req1.data.id}/approve`, {})).status, 403);
+
+  // The owner approves: the sale is recorded as requested, stock moves, credited to the requester.
+  const ok = await owner("POST", `/api/approvals/${req1.data.id}/approve`, { note: "OK this once" });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.data.data.status, "approved");
+  const t = (await owner("GET", "/api/c/txns")).data.find((x) => x.id === ok.data.data.txnId).data;
+  assert.equal(t.amount, 100);
+  assert.notEqual(t.no, "DR-FAKE");
+  assert.equal(t.override.requestId, req1.data.id);
+  assert.equal(t.createdBy, (await staff("GET", "/api/me")).data.id);
+  assert.equal(await stock(), before - 2);
+  assert.equal((await owner("POST", `/api/approvals/${req1.data.id}/approve`, {})).status, 409, "decided once");
+
+  // Rejection needs a reason; withdrawing is for the requester.
+  const req2 = await staff("POST", "/api/approvals", { sale, reason: "Another try" });
+  assert.equal((await owner("POST", `/api/approvals/${req2.data.id}/reject`, { note: "" })).status, 400);
+  const no = await owner("POST", `/api/approvals/${req2.data.id}/reject`, { note: "Collect first" });
+  assert.equal(no.data.data.status, "rejected");
+  const req3 = await staff("POST", "/api/approvals", { sale, reason: "Third" });
+  assert.equal((await staff("POST", `/api/approvals/${req3.data.id}/withdraw`)).data.data.status, "withdrawn");
+
+  // Requests expire.
+  await owner("PUT", "/api/c/settings/store", { data: { ...(await owner("GET", "/api/c/settings")).data.find((x) => x.id === "store").data, approvalHours: 1 } });
+  const req4 = await staff("POST", "/api/approvals", { sale, reason: "Fourth" });
+  assert.ok(req4.data.data.expiresAt - req4.data.data.requestedAt <= 3600e3 + 5);
+  const db = new Database(path.join(dir, "ledger.db"));
+  const row = db.prepare("SELECT data FROM docs WHERE collection='approvals' AND id=?").get(req4.data.id);
+  db.prepare("UPDATE docs SET data=? WHERE collection='approvals' AND id=?").run(JSON.stringify({ ...JSON.parse(row.data), expiresAt: Date.now() - 1000 }), req4.data.id);
+  db.close();
+  assert.equal((await owner("POST", `/api/approvals/${req4.data.id}/approve`, {})).status, 409);
+  assert.equal((await owner("GET", "/api/c/approvals")).data.find((x) => x.id === req4.data.id).data.status, "expired");
+
+  // A sale that isn't blocked is recorded normally instead.
+  await owner("PUT", "/api/c/dealers/ap2", { data: { name: "Good Payer" } });
+  assert.equal((await staff("POST", "/api/approvals", { sale: { ...sale, dealerId: "ap2" }, reason: "x y z" })).status, 400);
 });

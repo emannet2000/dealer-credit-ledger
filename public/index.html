@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0d6b5c">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon-192.png">
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}body{margin:0;font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
 <title>Dealer Credit Ledger</title>
 <meta name="claude:viewport-fit-sides" content="cover">
@@ -179,6 +181,8 @@ label.f,div.f{display:flex;flex-direction:column;gap:4px;font-size:13px;font-wei
 .rc-tbl th{color:#555;border-bottom:1px solid #999}
 .rc-tbl td{border-bottom:1px solid #ddd;padding:6px 8px}
 .rc-tbl tfoot td{border:0;font-weight:500;padding:4px 8px}
+.rc-tbl td.num,.rc-tbl th{white-space:nowrap}
+.rc-tbl td:first-child{min-width:7em}
 .rc-total{display:flex;justify-content:space-between;align-items:baseline;border-top:2px solid #111;margin-top:8px;padding-top:10px;font-weight:700}
 .rc-total b{font-family:var(--f-display);font-size:22px}
 .rc-bal{margin:8px 0}
@@ -192,6 +196,8 @@ label.f,div.f{display:flex;flex-direction:column;gap:4px;font-size:13px;font-wei
   .overlay{position:static!important;background:none!important;display:block!important}
   .sheet{width:100%!important;height:auto!important;overflow:visible!important;box-shadow:none!important;padding:0!important;background:#fff!important;animation:none!important}
   .receipt{border:0;padding:0}
+  .receipt .tbl-wrap{overflow:visible}
+  .rc-tbl{font-size:11px}
 }
 /* motion & feel */
 .btn{transition:background-color .15s,border-color .15s,box-shadow .15s,transform .08s}
@@ -287,6 +293,17 @@ body.scrolled header{box-shadow:0 4px 18px rgba(0,0,0,.07)}
 .alloc-h{padding:10px 0;font-size:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .alloc-r{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid var(--line);font-size:14px}
 .promo-box{border:1px dashed var(--line);border-radius:var(--r);padding:12px 14px;background:var(--surface)}
+.form-sec{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:10px 0 -4px;border-top:1px solid var(--line);padding-top:12px}
+.form-sec:first-child{border-top:0;padding-top:0;margin-top:0}
+.crm-log{list-style:none;margin:12px 0 0;padding:0}
+.crm-log li{position:relative;border-top:1px solid var(--line);padding:10px 0}
+.crm-log .crm-fu{margin-top:6px}
+.crm-log .crm-edit{position:absolute;top:8px;right:0}
+.seg [aria-pressed=true] .muted{color:inherit;opacity:.8}
+.link-row{display:flex;gap:8px;flex-wrap:wrap}
+.link-row input{flex:1 1 240px;min-width:0}
+.pick-amt{width:7.5em;flex:none}
+.pill.tag{font-size:11px;padding:1px 6px;margin-top:3px}
 pre.stmt{white-space:pre-wrap;background:var(--sunk);padding:12px;border-radius:8px;font-size:13px;max-height:280px;overflow:auto;margin:0}
 .thumb{width:44px;height:44px;border-radius:8px;object-fit:cover;background:var(--sunk);border:1px solid var(--line);flex:none;display:block}
 .thumb.ph{display:grid;place-items:center;color:var(--muted);font-size:10px;text-align:center;line-height:1.1}
@@ -345,14 +362,14 @@ dl.kv dd{margin:0;overflow-wrap:anywhere}
 "use strict";
 /* ================= state ================= */
 const S = {
-  dealers:new Map(), products:new Map(), txns:new Map(), moves:new Map(), orders:new Map(), settings:{},
-  loaded:{dealers:false,products:false,txns:false,moves:false,orders:false,settings:false},
+  dealers:new Map(), products:new Map(), txns:new Map(), moves:new Map(), orders:new Map(), interactions:new Map(), approvals:new Map(), settings:{},
+  loaded:{dealers:false,products:false,txns:false,moves:false,orders:false,interactions:false,approvals:false,settings:false},
   canWrite:true, canAdmin:false, me:null, names:{},
-  view:"overview", q:"", txFilter:"all", showArchived:false, catFilter:"",
+  view:"overview", q:"", txFilter:"all", showArchived:false, catFilter:"", stageF:"all", tagF:"",
   range:{preset:"month",from:"",to:""}
 };
 let db=null, downloads=null, assets=null, userNs=null;
-const COLS=["dealers","products","txns","moves","orders"];
+const COLS=["dealers","products","txns","moves","orders","interactions","approvals"];
 
 /* ================= helpers ================= */
 const $=(s,el=document)=>el.querySelector(s);
@@ -369,9 +386,13 @@ const daysBetween=(a,b)=>Math.round((new Date(b+"T00:00:00")-new Date(a+"T00:00:
 const fmtDate=s=>s?new Date(s+"T00:00:00").toLocaleDateString("en-PH",{month:"short",day:"numeric",year:"numeric"}):"—";
 const fmtStamp=ms=>ms>1e9?new Date(ms).toLocaleString("en-PH",{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"}):"";
 const METHODS=["Cash","GCash","Maya","Bank transfer","Check","Other"];
-const TYPE_LABEL={sale:"Credit sale",payment:"Payment",return:"Return"};
-const PREFIX={sale:"DR",payment:"OR",return:"RT"};
+const TYPE_LABEL={sale:"Credit sale",payment:"Payment",return:"Return",adjustment:"Adjustment",writeoff:"Write-off"};
+const PREFIX={sale:"DR",payment:"OR",return:"RT",adjustment:"ADJ",writeoff:"WO"};
 const isLive=t=>!t.voided;
+// A debit adjustment is a charge. Everything else reduces the balance.
+const isCharge=t=>t.type==="sale"||(t.type==="adjustment"&&t.direction==="debit");
+const txnEffect=t=>{ if(!t||t.voided) return 0; if(isCharge(t)) return r2(Number(t.amount)||0); return -r2(Number(t.amount)||0); };
+const allowNegativeStock=()=>S.settings.allowNegativeStock===true;
 const storeName=()=>S.settings.storeName||"Dealer Credit Ledger";
 const holdDays=()=>Number(S.settings.holdDays??60)||60;
 const blockOverLimit=()=>S.settings.blockOverLimit!==false;
@@ -405,35 +426,44 @@ function nextNo(type){
   return `${pre}-${String(max+1).padStart(5,"0")}`;
 }
 function dealerTxns(id,incVoid){ return [...S.txns.entries()].filter(([,t])=>t.dealerId===id&&(incVoid||isLive(t))).sort((a,b)=>(a[1].date||"").localeCompare(b[1].date||"")||(a[1].createdAt||0)-(b[1].createdAt||0)); }
-// Payments and returns settle the oldest credit sales first (FIFO).
+// Settles a dealer's live transactions ([[id,t],…] in date order). A payment with `alloc`
+// pays the chosen deliveries first (FR-085); everything else pays the oldest unpaid
+// delivery first. Same rules as settle() in lib/credit.js.
+function settle(tx){
+  const open=[], settled=[]; let pool=0;
+  for(const [id,t] of tx){
+    if(isCharge(t)){ let rem=r2(t.amount); if(pool>0.004){ const ap=Math.min(pool,rem); pool=r2(pool-ap); rem=r2(rem-ap); } if(rem>0.004) open.push({id,t,rem}); else settled.push({id,t,paid:t.date}); continue; }
+    let c=r2(t.amount);
+    const pay=(o,want)=>{ const ap=r2(Math.min(want,o.rem,c)); if(ap<=0) return; o.rem=r2(o.rem-ap); c=r2(c-ap); if(o.rem<=0.004){ open.splice(open.indexOf(o),1); settled.push({id:o.id,t:o.t,paid:t.date}); } };
+    if(t.type==="payment"&&Array.isArray(t.alloc)) for(const a of t.alloc){ const o=open.find(x=>x.id===a.id); if(o) pay(o,Number(a.amount)||0); }
+    while(c>0.004&&open.length) pay(open[0],c);
+    pool=r2(pool+c);
+  }
+  return {open,settled,credit:pool};
+}
 function dealerStatus(id){
-  const tx=dealerTxns(id).map(([,t])=>t); let credit=0, charged=0;
-  tx.forEach(t=>{ if(t.type==="sale") charged+=t.amount; else credit+=t.amount; });
-  let pool=credit; const t0=today(); const open=[];
-  tx.filter(t=>t.type==="sale").forEach(s=>{ const ap=Math.min(pool,s.amount); pool-=ap; const rem=r2(s.amount-ap); if(rem>0.004) open.push({...s,remaining:rem,late:s.dueDate&&s.dueDate<t0?daysBetween(s.dueDate,t0):0}); });
-  const balance=r2(charged-credit);
+  const all=dealerTxns(id), tx=all.map(([,t])=>t), t0=today();
+  const open=settle(all).open.map(o=>({...o.t,_id:o.id,remaining:o.rem,late:o.t.dueDate&&o.t.dueDate<t0?daysBetween(o.t.dueDate,t0):0}));
+  const balance=r2(tx.reduce((a,t)=>a+txnEffect(t),0));
   return { balance, overdue:r2(open.filter(o=>o.late>0).reduce((a,o)=>a+o.remaining,0)), maxLate:open.reduce((m,o)=>Math.max(m,o.late),0), open,
-    nextDue:open.filter(o=>!o.late).map(o=>o.dueDate).sort()[0]||null,
+    nextDue:open.filter(o=>!o.late&&o.dueDate).map(o=>o.dueDate).sort()[0]||null,
     lastPay:tx.filter(t=>t.type==="payment").map(t=>t.date).sort().pop()||null };
 }
 // Credit history: when each delivery was fully paid (FIFO), on-time rate and a simple rating.
 function creditHistory(id){
-  const tx=dealerTxns(id).map(([,t])=>t), t0=today(); const queue=[], settled=[]; let pool=0;
-  tx.forEach(t=>{
-    if(t.type==="sale"){ let rem=t.amount; if(pool>0.004){ const ap=Math.min(pool,rem); pool=r2(pool-ap); rem=r2(rem-ap); } if(rem<=0.004) settled.push({t,paid:t.date}); else queue.push({t,rem}); }
-    else { let c=t.amount; while(c>0.004&&queue.length){ const q=queue[0]; const ap=Math.min(c,q.rem); q.rem=r2(q.rem-ap); c=r2(c-ap); if(q.rem<=0.004){ queue.shift(); settled.push({t:q.t,paid:t.date}); } } pool=r2(pool+c); }
-  });
+  const all=dealerTxns(id), tx=all.map(([,t])=>t), t0=today(); const R=settle(all), queue=R.open, settled=R.settled;
   const rows=[...settled.map(s=>({t:s.t,paid:s.paid,late:s.t.dueDate?Math.max(0,daysBetween(s.t.dueDate,s.paid)):0,days:daysBetween(s.t.date,s.paid)})),
     ...queue.map(q=>({t:q.t,paid:null,rem:q.rem,late:q.t.dueDate&&q.t.dueDate<t0?daysBetween(q.t.dueDate,t0):0}))].sort((a,b)=>(b.t.date||"").localeCompare(a.t.date||""));
   const n=settled.length, done=rows.filter(r=>r.paid), onTime=done.filter(r=>r.late===0).length;
   const avgDays=n?Math.round(done.reduce((a,r)=>a+r.days,0)/n):null, avgLate=n?done.reduce((a,r)=>a+r.late,0)/n:0;
   const worst=rows.reduce((m,r)=>Math.max(m,r.late),0), openLate=rows.filter(r=>!r.paid).reduce((m,r)=>Math.max(m,r.late),0);
   const sum=k=>r2(tx.filter(t=>t.type===k).reduce((a,t)=>a+t.amount,0));
+  const sumCharges=r2(tx.filter(isCharge).reduce((a,t)=>a+t.amount,0));
   let score=100; if(n) score-=(1-onTime/n)*40; score-=Math.min(30,avgLate); if(openLate>30) score-=25; if(openLate>holdDays()) score-=40; else if(openLate>0) score-=10;
   const grade=n<2&&!openLate?{g:"New",label:"Not enough history yet",cls:"neutral"}:score>=85?{g:"A",label:"Excellent payer",cls:"good"}:score>=70?{g:"B",label:"Good payer",cls:"good"}:score>=50?{g:"C",label:"Pays late often",cls:"warn"}:{g:"D",label:"High risk",cls:"bad"};
   const months=[]; const d0=new Date(); for(let i=5;i>=0;i--){ const dt=new Date(d0.getFullYear(),d0.getMonth()-i,1); const ym=ymd(dt).slice(0,7);
-    const inM=tx.filter(t=>(t.date||"").startsWith(ym)); months.push({label:dt.toLocaleDateString("en-PH",{month:"short",year:"numeric"}),taken:r2(inM.filter(t=>t.type==="sale").reduce((a,t)=>a+t.amount,0)),paid:r2(inM.filter(t=>t.type==="payment").reduce((a,t)=>a+t.amount,0)),ret:r2(inM.filter(t=>t.type==="return").reduce((a,t)=>a+t.amount,0))}); }
-  return {rows,n,onTime,avgDays,worst,grade,score:Math.round(score),taken:sum("sale"),paid:sum("payment"),returned:sum("return"),since:tx.length?tx[0].date:null,months};
+    const inM=tx.filter(t=>(t.date||"").startsWith(ym)); months.push({label:dt.toLocaleDateString("en-PH",{month:"short",year:"numeric"}),taken:r2(inM.filter(isCharge).reduce((a,t)=>a+t.amount,0)),paid:r2(inM.filter(t=>t.type==="payment").reduce((a,t)=>a+t.amount,0)),ret:r2(inM.filter(t=>t.type==="return").reduce((a,t)=>a+t.amount,0))}); }
+  return {rows,n,onTime,avgDays,worst,grade,score:Math.round(score),taken:sumCharges,paid:sum("payment"),returned:sum("return"),writeoff:sum("writeoff"),since:tx.length?tx[0].date:null,months};
 }
 const HIST_CACHE={key:null,map:new Map()};
 function history(id){ if(HIST_CACHE.key!==S._ver){HIST_CACHE.key=S._ver;HIST_CACHE.map=new Map();} if(!HIST_CACHE.map.has(id)) HIST_CACHE.map.set(id,creditHistory(id)); return HIST_CACHE.map.get(id); }
@@ -446,6 +476,14 @@ function stockEffect(t){
   if(t.type==="return"&&t.restock) (t.items||[]).forEach(i=>m[i.productId]=(m[i.productId]||0)+i.qty);
   return m;
 }
+const OPEN_ORDER=["new","preparing","ready"];
+function reservedQty(exceptOrderId){
+  const out={};
+  S.orders.forEach((o,id)=>{ if(id===exceptOrderId||!OPEN_ORDER.includes(o.status)) return;
+    (o.items||[]).forEach(i=>out[i.productId]=(out[i.productId]||0)+(Number(i.qty)||0)); });
+  return out;
+}
+function availableStock(productId,exceptOrderId){ const p=S.products.get(productId); return (Number(p&&p.stock)||0)-(reservedQty(exceptOrderId)[productId]||0); }
 function diffEffect(oldT,newT){ const a=stockEffect(oldT), b=stockEffect(newT), m={}; new Set([...Object.keys(a),...Object.keys(b)]).forEach(k=>{const d=(b[k]||0)-(a[k]||0); if(d) m[k]=d;}); return m; }
 async function applyStock(delta){
   if(db.adjustStock){ const d=Object.fromEntries(Object.entries(delta).filter(([,v])=>v)); if(Object.keys(d).length) await db.adjustStock(d); return; }
@@ -462,7 +500,7 @@ function statusPill(st,d){
 const samplePill=x=>x&&x.sample?` <span class="pill sample">Example</span>`:"";
 const imgUrl=id=>"/_blob/"+encodeURIComponent(id);
 const thumb=(p,sm)=>p&&p.imageId?`<img class="thumb${sm?" sm":""}" src="${imgUrl(p.imageId)}" alt="" loading="lazy">`:`<span class="thumb ph${sm?" sm":""}" aria-hidden="true">No photo</span>`;
-const activeDealers=()=>[...S.dealers.entries()].filter(([,d])=>d.active!==false).sort((a,b)=>a[1].name.localeCompare(b[1].name));
+const activeDealers=()=>[...S.dealers.entries()].filter(([,d])=>d.active!==false&&stageOf(d)!=="lost").sort((a,b)=>a[1].name.localeCompare(b[1].name));
 const activeProducts=()=>[...S.products.entries()].filter(([,p])=>p.active!==false).sort((a,b)=>a[1].name.localeCompare(b[1].name));
 async function shrinkImage(file){
   try{ const bmp=await createImageBitmap(file); const s=Math.min(1,900/Math.max(bmp.width,bmp.height));
@@ -527,7 +565,7 @@ function vOverview(){
   const segs=[["current","Not yet due","var(--accent)"],["d30","1–30 days late","var(--warn)"],["d60","31–60 days","#d97a2b"],["d90","61–90 days","var(--bad)"],["d90p","Over 90 days","#7a1712"]];
   const low=activeProducts().filter(([,p])=>p.reorderLevel!=null&&p.stock<=p.reorderLevel).sort((a,b)=>a[1].stock-b[1].stock);
   const mn=new Date().toLocaleDateString("en-PH",{month:"long"});
-  return sampleBanner()+healthNotices()+`
+  return sampleBanner()+offlineNotices()+approvalNotices()+healthNotices()+`
   <div class="kpis">
     <div class="kpi"><div class="lbl">Total receivables</div><div class="val num">${P(total)}</div><div class="sub">Owed by ${owing} dealer${owing===1?"":"s"}</div></div>
     <div class="kpi ${overdue>0?"bad":""}"><div class="lbl">Overdue</div><div class="val num">${P(overdue)}</div><div class="sub">${od.length} dealer${od.length===1?"":"s"} past due</div></div>
@@ -548,8 +586,9 @@ function vOverview(){
       </section>
     </div>
     <div class="col">
+      ${followUpsPanel()}
       <section class="panel">
-        <h2>Receivables aging</h2>
+        <div class="panel-head"><h2>Receivables aging</h2><button class="btn sm" data-act="aging" type="button">Full report</button></div>
         <div class="aging" role="img" aria-label="Aging of unpaid balances">${segs.map(([k,,c])=>ag[k]>0?`<span style="width:${ag[k]/agTot*100}%;background:${c}"></span>`:"").join("")}</div>
         <div class="legend">${segs.map(([k,l,c])=>`<div><span class="small muted"><i class="dot" style="background:${c}"></i>${l}</span><b class="num">${P(ag[k])}</b></div>`).join("")}</div>
       </section>
@@ -561,20 +600,28 @@ function vOverview(){
   </div>`;
 }
 function vDealers(){
-  const q=S.q.toLowerCase();
-  const rows=[...S.dealers.entries()].filter(([,d])=>S.showArchived||d.active!==false).filter(([,d])=>!q||[d.name,d.phone,d.area].join(" ").toLowerCase().includes(q))
+  const q=S.q.toLowerCase(), sf=S.stageF, tags=allTags();
+  const inStage=d=>sf==="all"?stageOf(d)!=="lost":sf==="prospects"?isProspect(d):sf==="dealers"?stageOf(d)==="dealer":stageOf(d)==="lost";
+  const rows=[...S.dealers.entries()].filter(([,d])=>S.showArchived||d.active!==false).filter(([,d])=>inStage(d)&&(!S.tagF||(d.tags||[]).includes(S.tagF)))
+    .filter(([,d])=>!q||[d.name,d.phone,d.area,d.email,d.address,d.referredBy,d.source,...(d.tags||[])].join(" ").toLowerCase().includes(q))
     .map(([id,d])=>({id,d,st:status(id)})).sort((a,b)=>b.st.balance-a.st.balance||a.d.name.localeCompare(b.d.name));
   const arch=[...S.dealers.values()].filter(d=>d.active===false).length;
+  const cnt=f=>[...S.dealers.values()].filter(d=>d.active!==false&&f(d)).length;
+  const segs=[["all","All",cnt(d=>stageOf(d)!=="lost")],["dealers","Dealers",cnt(d=>stageOf(d)==="dealer")],["prospects","Prospects",cnt(isProspect)],["lost","Lost",cnt(d=>stageOf(d)==="lost")]];
   return sampleBanner()+`<section class="panel">
-    <div class="panel-head"><h2>Dealers <span class="muted small">(${S.dealers.size-arch} active)</span></h2><div class="actions">${downloads?`<button class="btn sm" data-act="export-dealers" type="button">Export CSV</button>`:""}${S.canWrite?`<button class="btn primary sm" data-act="new-dealer" type="button">+ Add dealer</button>`:""}</div></div>
-    <div class="toolbar"><input id="q" type="search" placeholder="Search name, phone or area" value="${esc(S.q)}" aria-label="Search dealers">${arch?`<label class="chk"><input type="checkbox" id="showArch" ${S.showArchived?"checked":""}> Show ${arch} archived</label>`:""}</div>
-    ${rows.length?`<div class="tbl-wrap"><table><thead><tr><th>Dealer</th><th class="r">Balance</th><th>Credit used</th><th>Next due</th><th>Last payment</th><th>Rating</th><th>Status</th></tr></thead><tbody>
-    ${rows.map(({id,d,st})=>{ const pct=d.creditLimit?Math.min(100,Math.max(0,st.balance/d.creditLimit*100)):0; const cls=pct>=100?"bad":pct>=80?"warn":"";
-      return `<tr class="click" tabindex="0" data-dealer="${id}"><td><b>${esc(d.name)}</b>${samplePill(d)}${d.active===false?` <span class="pill neutral">Archived</span>`:""}<div class="small muted">${esc(d.phone||"")}${d.area?" · "+esc(d.area):""}</div></td>
-      <td class="r num"><b>${P(st.balance)}</b></td>
-      <td class="small num">${d.creditLimit?`${Math.round(pct)}% of ${P(d.creditLimit)}<div class="meter"><i class="${cls}" style="width:${pct}%"></i></div>`:`<span class="muted">No limit</span>`}</td>
-      <td class="small nowrap">${st.nextDue?fmtDate(st.nextDue):"—"}</td><td class="small nowrap">${st.lastPay?fmtDate(st.lastPay):"—"}</td><td>${gradePill(history(id))}</td><td>${statusPill(st,d)}</td></tr>`;}).join("")}
-    </tbody></table></div>`:(S.dealers.size?`<div class="empty"><h3>No match</h3><p>No dealer matches “${esc(S.q)}”.</p></div>`:emptyStart())}
+    <div class="panel-head"><h2>Dealers <span class="muted small">(${cnt(d=>stageOf(d)==="dealer")} active)</span></h2><div class="actions">${downloads?`<button class="btn sm" data-act="export-dealers" type="button">Export CSV</button>`:""}${S.canWrite?`<button class="btn sm" data-act="new-prospect" type="button">+ Add prospect</button><button class="btn primary sm" data-act="new-dealer" type="button">+ Add dealer</button>`:""}</div></div>
+    <div class="toolbar"><div class="seg" role="group" aria-label="Stage">${segs.map(([v,l,n])=>`<button type="button" data-sf="${v}" aria-pressed="${sf===v}">${l} <span class="muted">${n}</span></button>`).join("")}</div>
+      <input id="q" type="search" placeholder="Search name, phone, area, tag…" value="${esc(S.q)}" aria-label="Search dealers">
+      ${tags.length?`<select id="tagFilter" aria-label="Tag"><option value="">All tags</option>${tags.map(t=>`<option ${t===S.tagF?"selected":""}>${esc(t)}</option>`).join("")}</select>`:""}
+      ${arch?`<label class="chk"><input type="checkbox" id="showArch" ${S.showArchived?"checked":""}> Show ${arch} archived</label>`:""}</div>
+    ${rows.length?`<div class="tbl-wrap"><table><thead><tr><th>Dealer</th><th>Stage</th><th class="r">Balance</th><th>Credit used</th><th>Next due</th><th>Follow-up</th><th>Rating</th><th>Status</th></tr></thead><tbody>
+    ${rows.map(({id,d,st})=>{ const pct=d.creditLimit?Math.min(100,Math.max(0,st.balance/d.creditLimit*100)):0; const cls=pct>=100?"bad":pct>=80?"warn":""; const pr=isProspect(d)||stageOf(d)==="lost";
+      return `<tr class="click" tabindex="0" data-dealer="${id}"><td><b>${esc(d.name)}</b>${samplePill(d)}${d.active===false?` <span class="pill neutral">Archived</span>`:""}<div class="small muted">${esc(d.phone||"")}${d.area?" · "+esc(d.area):""}</div>${(d.tags||[]).length?`<div>${d.tags.slice(0,3).map(t=>`<span class="pill neutral tag">${esc(t)}</span>`).join(" ")}</div>`:""}</td>
+      <td>${stagePill(d)}</td>
+      <td class="r num"><b>${pr&&!st.balance?"—":P(st.balance)}</b></td>
+      <td class="small num">${pr?`<span class="muted">—</span>`:d.creditLimit?`${Math.round(pct)}% of ${P(d.creditLimit)}<div class="meter"><i class="${cls}" style="width:${pct}%"></i></div>`:`<span class="muted">No limit</span>`}</td>
+      <td class="small nowrap">${st.nextDue?fmtDate(st.nextDue):"—"}</td><td class="small nowrap">${followUpCell(id)}</td><td>${pr?"":gradePill(history(id))}</td><td>${pr?"":statusPill(st,d)}</td></tr>`;}).join("")}
+    </tbody></table></div>`:(S.dealers.size?`<div class="empty"><h3>No match</h3><p>${S.q?`No one matches “${esc(S.q)}”.`:"No one in this list yet."}</p></div>`:emptyStart())}
   </section>`;
 }
 function vProducts(){
@@ -590,23 +637,25 @@ function vProducts(){
     <div class="toolbar"><input id="q" type="search" placeholder="Search product, code or category" value="${esc(S.q)}" aria-label="Search products">
       ${cats.length?`<select id="catFilter" aria-label="Category"><option value="">All categories</option>${cats.map(c=>`<option ${c===S.catFilter?"selected":""}>${esc(c)}</option>`).join("")}</select>`:""}
       ${arch?`<label class="chk"><input type="checkbox" id="showArch" ${S.showArchived?"checked":""}> Show ${arch} archived</label>`:""}</div>
-    ${rows.length?`<div class="tbl-wrap"><table><thead><tr><th>Product</th><th>Code</th><th class="r">Dealer price</th><th class="r">SRP</th><th class="r">Margin</th><th class="r">Stock</th></tr></thead><tbody>
-    ${rows.map(([id,p])=>{ const low=p.reorderLevel!=null&&p.stock<=p.reorderLevel; const mg=p.srp?r2(p.srp-p.dealerPrice):null;
-      return `<tr class="${S.canWrite?"click":""}" ${S.canWrite?`tabindex="0" data-product="${id}"`:""}><td><div class="prod-cell">${thumb(p)}<div><b>${esc(p.name)}</b>${samplePill(p)}${p.active===false?` <span class="pill neutral">Archived</span>`:""}<div class="small muted">${esc(p.category||"")}${p.imageLink?`${p.category?" · ":""}<a href="${esc(p.imageLink)}" target="_blank" rel="noopener noreferrer">View picture ↗</a>`:""}</div></div></div></td>
-      <td class="small muted">${esc(p.code||"—")}</td><td class="r num">${P(p.dealerPrice)}</td><td class="r num nowrap">${p.srp||promoOn(p)?priceTag(p,1):"—"}</td><td class="r num small">${mg!=null?P(mg):"—"}</td><td class="r num">${low?`<span class="pill ${p.stock<=0?"bad":"warn"}">${p.stock}</span>`:p.stock}</td></tr>`;}).join("")}
+    ${rows.length?`<div class="tbl-wrap"><table><thead><tr><th>Product</th><th>Code</th><th class="r">Dealer price</th><th class="r">SRP</th><th class="r">Cost</th><th class="r">Profit/pc</th><th class="r">Stock</th></tr></thead><tbody>
+    ${rows.map(([id,p])=>{ const low=p.reorderLevel!=null&&p.stock<=p.reorderLevel; const profit=p.cost!=null?r2(p.dealerPrice-p.cost):null; const mp=profit!=null&&p.dealerPrice?Math.round(profit/p.dealerPrice*100):null;
+      return `<tr class="${S.canWrite?"click":""}" ${S.canWrite?`tabindex="0" data-product="${id}"`:""}><td><div class="prod-cell">${thumb(p)}<div><b>${esc(p.name)}</b>${samplePill(p)}${p.active===false?` <span class="pill neutral">Archived</span>`:""}<div class="small muted">${esc(p.category||"")}${p.imageLink&&!p.imageId?`${p.category?" · ":""}<a href="${esc(p.imageLink)}" target="_blank" rel="noopener noreferrer">View picture ↗</a>`:""}</div></div></div></td>
+      <td class="small muted">${esc(p.code||"—")}</td><td class="r num">${P(p.dealerPrice)}</td><td class="r num nowrap">${p.srp||promoOn(p)?priceTag(p,1):"—"}</td><td class="r num small">${p.cost!=null?P(p.cost):"—"}</td><td class="r num small">${profit!=null?`${P(profit)}${mp!=null?`<div class="muted">${mp}%</div>`:""}`:"—"}</td><td class="r num">${low?`<span class="pill ${p.stock<=0?"bad":"warn"}">${p.stock}</span>`:p.stock}</td></tr>`;}).join("")}
     </tbody></table></div>`:`<div class="empty"><h3>${S.products.size?"No match":"No products yet"}</h3><p>${S.products.size?"Try another search or category.":"Add the items you release to dealers, with dealer price and stock on hand."}</p></div>`}
   </section>`;
 }
 function txDetails(t){
   const it=(t.items||[]).map(i=>`${esc(i.name)} ×${i.qty}`).join(", ");
   const no=t.no?`<span class="small muted">${esc(t.no)}</span> `:"";
-  const vd=t.voided?` <span class="pill bad">Voided</span>`:"";
+  const vd=(t.voided?` <span class="pill bad">Voided</span>`:"")+(t.offlineHeld?` <span class="pill bad">Needs review</span>`:t.offlinePending?` <span class="pill warn">Not synced</span>`:"");
   if(t.opening) return `${no}<span class="pill neutral">Opening balance</span>${vd}<div class="small muted">Due ${fmtDate(t.dueDate)}${t.note&&t.note!=="Opening balance"?" · "+esc(t.note):""}</div>`;
   if(t.type==="sale") return `${no}<span class="pill neutral">Credit sale</span>${vd} <span class="small">${it}</span><div class="small muted">Due ${fmtDate(t.dueDate)}${t.pctDiscount?(t.discountPct!=null?` · less ${t.discountPct}%`:" · less dealer discount"):""}${t.discount?` · less ${P(t.discount)}`:""}${t.note?" · "+esc(t.note):""}</div>`;
-  if(t.type==="return") return `${no}<span class="pill warn">Return</span>${vd} <span class="small">${it}</span><div class="small muted">${t.restock?"Back to stock":"Not restocked"}${t.note?" · "+esc(t.note):""}</div>`;
-  return `${no}<span class="pill good">${t.payKind==="partial"?"Partial payment":t.payKind==="full"?"Full payment":"Payment"}</span>${vd} <span class="small">${esc(t.method||"")}${t.ref?" · Ref "+esc(t.ref):""}</span>${t.note?`<div class="small muted">${esc(t.note)}</div>`:""}`;
+  if(t.type==="return") return `${no}<span class="pill warn">Return</span>${vd} <span class="small">${it}</span><div class="small muted">${t.restock?"Back to stock":"Not restocked"}${t.saleNo?` · from ${esc(t.saleNo)}`:""}${t.note?" · "+esc(t.note):""}</div>`;
+  if(t.type==="adjustment") return `${no}<span class="pill ${t.direction==="debit"?"warn":"good"}">${t.direction==="debit"?"Debit adjustment":"Credit adjustment"}</span>${vd} <div class="small muted">${t.reason?esc(t.reason):""}${t.note?" · "+esc(t.note):""}</div>`;
+  if(t.type==="writeoff") return `${no}<span class="pill bad">Write-off</span>${vd} <div class="small muted">${esc(t.reason||"Bad debt")}${t.note?" · "+esc(t.note):""}</div>`;
+  return `${no}<span class="pill good">${t.payKind==="partial"?"Partial payment":t.payKind==="full"?"Full payment":"Payment"}</span>${vd} <span class="small">${esc(t.method||"")}${t.ref?" · Ref "+esc(t.ref):""}${(t.alloc||[]).length?` · for ${t.alloc.map(a=>esc(a.no||"delivery")).join(", ")}`:""}</span>${t.note?`<div class="small muted">${esc(t.note)}</div>`:""}`;
 }
-const sign=t=>t.type==="sale"?"":"−";
+const sign=t=>isCharge(t)?"":"−";
 function vActivity(){
   const q=S.q.toLowerCase();
   const rows=[...S.txns.entries()].filter(([,t])=>S.txFilter==="all"?true:S.txFilter==="voided"?t.voided:(t.type===S.txFilter&&!t.voided))
@@ -616,7 +665,7 @@ function vActivity(){
   return sampleBanner()+`<section class="panel">
     <div class="panel-head"><h2>Transactions</h2><div class="actions">${downloads?`<button class="btn sm" data-act="export-tx" type="button">Export CSV</button>`:""}${S.canWrite?`<button class="btn sm" data-act="new-return" type="button">+ Return</button>`:""}</div></div>
     <div class="toolbar"><input id="q" type="search" placeholder="Search dealer, DR/OR no., product, reference" value="${esc(S.q)}" aria-label="Search transactions">
-      <select id="txFilter" aria-label="Type">${[["all","All"],["sale","Credit sales"],["payment","Payments"],["return","Returns"],["voided","Voided"]].map(([v,l])=>`<option value="${v}" ${S.txFilter===v?"selected":""}>${l}</option>`).join("")}</select></div>
+      <select id="txFilter" aria-label="Type">${[["all","All"],["sale","Credit sales"],["payment","Payments"],["return","Returns"],["adjustment","Adjustments"],["writeoff","Write-offs"],["voided","Voided"]].map(([v,l])=>`<option value="${v}" ${S.txFilter===v?"selected":""}>${l}</option>`).join("")}</select></div>
     ${rows.length?`<div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Dealer</th><th>Details</th><th class="r">Amount</th></tr></thead><tbody>
     ${shown.map(([id,t])=>{ const d=S.dealers.get(t.dealerId); return `<tr class="click ${t.voided?"void":""}" tabindex="0" data-tx="${id}"><td class="small nowrap">${fmtDate(t.date)}</td><td><b>${esc(d?d.name:"(removed dealer)")}</b>${samplePill(t)}</td><td>${txDetails(t)}</td><td class="r num nowrap amt">${sign(t)}${P(t.amount)}</td></tr>`; }).join("")}
     </tbody></table></div>${rows.length>300?`<p class="small muted">Showing the latest 300 of ${rows.length}. Search or export CSV to see older ones.</p>`:""}`:`<div class="empty"><h3>No transactions</h3><p>Credit sales, payments and returns you record will be listed here.</p></div>`}
@@ -629,14 +678,24 @@ function rangeDates(){
   if(R.preset==="year") return [`${y}-01-01`,`${y}-12-31`];
   return [R.from||"0000-01-01",R.to||"9999-12-31"];
 }
+function lineCost(i){ return i.cost!=null?Number(i.cost):Number((S.products.get(i.productId)||{}).cost)||0; }
 function reportData(){
   const [from,to]=rangeDates();
   const tx=[...S.txns.values()].filter(t=>isLive(t)&&t.date>=from&&t.date<=to);
-  const tot={sale:0,payment:0,return:0,discount:0,count:tx.length}; const byP={}, byD={}, byM={};
-  tx.forEach(t=>{ tot[t.type]+=t.amount; if(t.type==="sale") tot.discount+=(t.discount||0)+(t.pctDiscount||0);
-    const d=byD[t.dealerId]=byD[t.dealerId]||{sale:0,payment:0,return:0}; d[t.type]+=t.amount;
+  const tot={sale:0,payment:0,return:0,adjustment:0,adjustmentDebit:0,adjustmentCredit:0,writeoff:0,discount:0,cost:0,profit:0,count:tx.length};
+  const byP={}, byD={}, byM={};
+  tx.forEach(t=>{ tot[t.type]=(tot[t.type]||0)+t.amount;
+    if(t.type==="sale") tot.discount+=(t.discount||0)+(t.pctDiscount||0);
+    if(t.type==="adjustment"){ if(t.direction==="debit") tot.adjustmentDebit+=t.amount; else tot.adjustmentCredit+=t.amount; }
+    const d=byD[t.dealerId]=byD[t.dealerId]||{sale:0,payment:0,return:0,adjustment:0,writeoff:0}; d[t.type]=(d[t.type]||0)+t.amount;
     if(t.type==="payment") byM[t.method||"Other"]=(byM[t.method||"Other"]||0)+t.amount;
-    if(t.type!=="payment") (t.items||[]).forEach(i=>{ const p=byP[i.productId]=byP[i.productId]||{name:i.name,qty:0,amt:0,ret:0}; if(t.type==="sale"){p.qty+=i.qty;p.amt+=i.qty*i.price-lineDisc(i,t);} else p.ret+=i.qty; }); });
+    if(t.items&&(t.type==="sale"||t.type==="return")) (t.items||[]).forEach(i=>{
+      const p=byP[i.productId]=byP[i.productId]||{name:i.name,qty:0,amt:0,ret:0,cost:0,profit:0};
+      const gross=r2(i.qty*i.price-lineDisc(i,t)), cost=r2(i.qty*lineCost(i));
+      if(t.type==="sale"){ p.qty+=i.qty; p.amt=r2(p.amt+gross); p.cost=r2(p.cost+cost); p.profit=r2(p.profit+gross-cost); tot.cost=r2(tot.cost+cost); tot.profit=r2(tot.profit+gross-cost); }
+      else { p.ret+=i.qty; p.amt=r2(p.amt-gross); p.cost=r2(p.cost-cost); p.profit=r2(p.profit-(gross-cost)); tot.cost=r2(tot.cost-cost); tot.profit=r2(tot.profit-(gross-cost)); }
+    });
+  });
   return {from,to,tot,byP,byD,byM};
 }
 function vReports(){
@@ -647,7 +706,7 @@ function vReports(){
   const net=r2(tot.sale-tot.return);
   const pr=[["month","This month"],["last","Last month"],["year","This year"],["custom","Custom"]];
   return trendChart()+`<section class="panel" style="margin-bottom:20px">
-    <div class="panel-head"><h2>Report period</h2>${downloads?`<button class="btn sm" data-act="export-report" type="button">Export report CSV</button>`:""}</div>
+    <div class="panel-head"><h2>Report period</h2><div class="actions"><button class="btn sm" data-act="aging" type="button">Receivables aging</button>${window.APP?`<button class="btn sm" data-act="approvals" type="button">Approvals</button>`:""}${downloads?`<button class="btn sm" data-act="export-report" type="button">Export report CSV</button>`:""}</div></div>
     <div class="toolbar"><div class="seg" role="group" aria-label="Period">${pr.map(([v,l])=>`<button type="button" data-preset="${v}" aria-pressed="${S.range.preset===v}">${l}</button>`).join("")}</div>
     ${S.range.preset==="custom"?`<input type="date" id="rFrom" value="${esc(S.range.from)}" aria-label="From"><span class="muted">to</span><input type="date" id="rTo" value="${esc(S.range.to)}" aria-label="To">`:`<span class="small muted">${fmtDate(R.from)} – ${fmtDate(R.to)}</span>`}</div>
   </section>
@@ -656,11 +715,13 @@ function vReports(){
     <div class="kpi"><div class="lbl">Returns</div><div class="val num">${P(tot.return)}</div><div class="sub">Net sales ${P(net)}</div></div>
     <div class="kpi good"><div class="lbl">Collections</div><div class="val num">${P(tot.payment)}</div><div class="sub">${net>0?`${Math.round(tot.payment/net*100)}% of net sales`:"Payments received"}</div></div>
     <div class="kpi"><div class="lbl">Transactions</div><div class="val num">${tot.count}</div><div class="sub">Voided ones not counted</div></div>
+    <div class="kpi ${tot.profit<0?"bad":"good"}"><div class="lbl">Gross profit</div><div class="val num">${P(tot.profit)}</div><div class="sub">${tot.sale-tot.return>0?`${Math.round(tot.profit/(tot.sale-tot.return)*100)}% margin`:"Cost of goods sold"}</div></div>
+    <div class="kpi ${tot.writeoff?"bad":""}"><div class="lbl">Write-offs</div><div class="val num">${P(tot.writeoff)}</div><div class="sub">${tot.adjustmentDebit||tot.adjustmentCredit?`Adjustments: +${P(tot.adjustmentDebit)} / −${P(tot.adjustmentCredit)}`:"Bad debt removed"}</div></div>
   </div>
   <div class="grid2e">
     <section class="panel"><h2>By product</h2>
-      ${prod.length?`<div class="tbl-wrap"><table><thead><tr><th>Product</th><th class="r">Sold</th><th class="r">Returned</th><th class="r">Sales</th></tr></thead><tbody>
-      ${prod.map(([pid,p])=>`<tr><td><div class="prod-cell">${thumb(S.products.get(pid),1)}<span>${esc(p.name)}</span></div></td><td class="r num">${p.qty}</td><td class="r num">${p.ret||"—"}</td><td class="r num">${P(p.amt)}</td></tr>`).join("")}
+      ${prod.length?`<div class="tbl-wrap"><table><thead><tr><th>Product</th><th class="r">Sold</th><th class="r">Returned</th><th class="r">Sales</th><th class="r">Cost</th><th class="r">Profit</th></tr></thead><tbody>
+      ${prod.map(([pid,p])=>`<tr><td><div class="prod-cell">${thumb(S.products.get(pid),1)}<span>${esc(p.name)}</span></div></td><td class="r num">${p.qty}</td><td class="r num">${p.ret||"—"}</td><td class="r num">${P(p.amt)}</td><td class="r num">${P(p.cost)}</td><td class="r num ${p.profit<0?"":""}">${P(p.profit)}</td></tr>`).join("")}
       </tbody></table></div>`:`<p class="muted small">No product movement in this period.</p>`}
     </section>
     <div class="col">
@@ -692,7 +753,9 @@ function vStore(){
       <h3 class="span" style="font-size:15px;margin-top:8px">Credit rules</h3>
       <label class="f">Default credit limit for new dealers (₱)<input id="st-limit" type="number" min="0" step="0.01" value="${esc(s.defaultLimit??"")}" placeholder="e.g. 5000" ${S.canAdmin?"":"disabled"}></label>
       <label class="f">Put dealers on hold after (days late)<input id="st-hold" type="number" min="1" step="1" value="${esc(s.holdDays??60)}" ${S.canAdmin?"":"disabled"}></label>
+      <label class="f">Approval requests expire after (hours)<input id="st-apph" type="number" min="1" max="336" step="1" value="${esc(s.approvalHours??24)}" ${S.canAdmin?"":"disabled"}><span class="hint">Staff can send blocked credit sales to you for approval.</span></label>
       <label class="chk span"><input type="checkbox" id="st-block" ${s.blockOverLimit!==false?"checked":""} ${S.canAdmin?"":"disabled"}> Block credit sales over the limit unless the owner approves</label>
+      <label class="chk span"><input type="checkbox" id="st-neg" ${s.allowNegativeStock?"checked":""} ${S.canAdmin?"":"disabled"}> Allow stock to go below zero (backorders)</label>
       <label class="f span">Collection reminder message<textarea id="st-msg" rows="4" ${S.canAdmin?"":"disabled"}>${esc(s.reminderTemplate||DEFAULT_MSG)}</textarea><span class="hint">{name}, {balance}, {status}, {store} and {payinfo} are filled in for each dealer.</span></label>
       ${S.canAdmin?`<div class="actions span"><button class="btn primary" type="submit">Save store details</button></div>`:`<p class="small muted span" style="margin:0">Only the ledger owner or editors can change store details.</p>`}
     </form>
@@ -702,7 +765,7 @@ function vStore(){
     <section class="panel"><h2>Backup and restore</h2>
       <p class="small" style="margin-top:0">Download a backup regularly and keep it on your phone, computer or Google Drive. Photos are not inside the backup file. The server also saves an automatic backup of everything (photos excluded) every day.</p>
       <div class="actions">${downloads?`<button class="btn primary" data-act="backup" type="button">Download backup</button>`:`<span class="small muted">Downloads aren't available in this view.</span>`}
-      ${S.canAdmin?`<label class="btn" for="restoreFile" style="cursor:pointer">Restore from backup…</label><input id="restoreFile" type="file" accept=".json,application/json" hidden>`:""}</div>
+      ${S.canAdmin?`<button class="btn" data-act="backup-full" type="button">Download full backup (accounts + photos)</button><label class="btn" for="restoreFile" style="cursor:pointer">Restore from backup…</label><input id="restoreFile" type="file" accept=".json,application/json" hidden><label class="btn" for="restoreFullFile" style="cursor:pointer">Restore full backup…</label><input id="restoreFullFile" type="file" accept=".json,application/json" hidden>`:""}</div>
       <div id="restoreArea"></div>
     </section>
     <section class="panel"><h2>Ledger health</h2>
@@ -713,13 +776,108 @@ function vStore(){
   </div></div>`;
 }
 
+/* ---------- approval requests for blocked credit sales (FR-084) ---------- */
+const APP_L={pending:"Waiting",approved:"Approved",rejected:"Rejected",withdrawn:"Withdrawn",expired:"Expired"};
+const APP_C={pending:"warn",approved:"good",rejected:"bad",withdrawn:"neutral",expired:"neutral"};
+const apStatus=r=>r.status==="pending"&&r.expiresAt<Date.now()?"expired":r.status;
+const apPill=r=>`<span class="pill ${APP_C[apStatus(r)]}">${APP_L[apStatus(r)]||esc(r.status)}</span>`;
+function apBlockText(b){ if(!b) return ""; const out=[];
+  if(b.hold) out.push(`On credit hold · ${b.maxLate} days late (limit ${b.holdDays})`);
+  if(b.over) out.push(`Over the credit limit · balance ${P(b.balance)} of ${P(b.creditLimit)}`);
+  if(b.overdue) out.push(`${P(b.overdue)} overdue`); return out.join(" · "); }
+const hoursLeft=ms=>{ const h=Math.max(0,(ms-Date.now())/3600e3); return h>=1?`${Math.round(h)} h left`:`${Math.max(1,Math.round(h*60))} min left`; };
+function askApproval(data,opts,paidMethod,serverMsg){
+  if(!(window.APP&&window.APP.requestApproval)){ toast("This dealer is blocked. Ask the owner to approve the sale."); return; }
+  const d=S.dealers.get(data.dealerId)||{name:""}, st=status(data.dealerId), lim=d.creditLimit;
+  show(()=>[head("Send for approval",esc(d.name))+`
+    <div class="notice warn"><p>${esc(serverMsg||(st.maxLate>holdDays()?`${d.name} is on credit hold (${st.maxLate} days late).`:`This sale would put ${d.name} over the credit limit.`))}</p></div>
+    <dl class="kv"><dt>Sale</dt><dd><b class="num">${P(data.amount)}</b> · ${data.items.length} item${data.items.length===1?"":"s"}: ${esc(data.items.slice(0,4).map(i=>`${i.name} ×${i.qty}`).join(", "))}${data.items.length>4?"…":""}</dd>
+      <dt>Balance now</dt><dd class="num">${P(st.balance)}${st.overdue?` · <span style="color:var(--bad)">${P(st.overdue)} overdue</span>`:""}</dd>${lim?`<dt>Credit limit</dt><dd class="num">${P(lim)}</dd>`:""}
+      ${paidMethod?`<dt>Payment</dt><dd>Paid on release by ${esc(paidMethod)}</dd>`:""}</dl>
+    <form id="apf" class="form-grid"><label class="f span">Why should the owner approve it?<textarea id="ap-why" rows="3" required minlength="3" maxlength="500" placeholder="e.g. Dealer paid ₱2,000 by GCash today; reference to follow"></textarea></label>
+    <p class="small muted span" style="margin:0">Nothing is recorded and no stock is taken until the owner or an editor approves. The request expires after ${Number(S.settings.approvalHours)||24} hours.</p>
+    <div class="actions span"><button class="btn primary" type="submit">Send for approval</button><button class="btn" type="button" data-back>Back to the sale</button></div></form>`,sh=>{
+    $("#apf",sh).addEventListener("submit",e=>{ e.preventDefault(); const btn=e.submitter||$("button[type=submit]",sh); const why=$("#ap-why",sh).value.trim(); if(why.length<3){ toast("Give the owner a reason"); return; }
+      guarded(btn,async()=>{ await window.APP.requestApproval({sale:data,reason:why,orderId:opts&&opts.orderId||null,paidMethod:paidMethod||null}); toast("Sent to the owner for approval"); closeAll(); }); });
+  }]);
+}
+function approvalNotices(){ if(!S.approvals.size) return ""; const all=[...S.approvals.values()], t3=Date.now()-3*864e5;
+  const pend=all.filter(r=>apStatus(r)==="pending");
+  if(S.canAdmin) return pend.length?`<div class="notice warn"><p><b>${pend.length} credit sale${pend.length===1?" is":"s are"} waiting for your approval.</b> ${esc(pend.slice(0,3).map(r=>(S.dealers.get(r.dealerId)||{}).name||"").join(", "))}</p><button class="btn sm" data-act="approvals" type="button">Review</button></div>`:"";
+  const mine=all.filter(r=>r.requestedBy===S.me), wait=mine.filter(r=>apStatus(r)==="pending").length, recent=mine.filter(r=>r.status!=="pending"&&r.status!=="withdrawn"&&(r.decidedAt||0)>t3);
+  if(!wait&&!recent.length) return "";
+  return `<div class="notice ${recent.some(r=>r.status==="rejected")?"bad":"info"}"><p>${wait?`<b>Your ${wait===1?"request is":wait+" requests are"} waiting for approval.</b> `:""}${recent.map(r=>`${APP_L[apStatus(r)]}: ${esc((S.dealers.get(r.dealerId)||{}).name||"")} ${P(r.amount)}${r.txnNo?` (${esc(r.txnNo)})`:""}${r.note?` — “${esc(r.note)}”`:""}`).join(" · ")}</p><button class="btn sm" data-act="approvals" type="button">View</button></div>`;
+}
+function approvalsCsv(rows){ return csv([["Request ID","Requested","Dealer","Amount","Requested by","Reason","Status","Decided","Decided by","Note","Sale no."],
+  ...rows.map(([id,r])=>[id,new Date(r.requestedAt).toISOString(),(S.dealers.get(r.dealerId)||{}).name||"",r.amount,nameOf(r.requestedBy),r.reason,APP_L[apStatus(r)],r.decidedAt?new Date(r.decidedAt).toISOString():"",r.decidedBy?nameOf(r.decidedBy):"",r.note||"",r.txnNo||""])]); }
+function approvalsSheet(){
+  let tab=[...S.approvals.values()].some(r=>apStatus(r)==="pending")?"pending":"history"; const notes={};
+  show(()=>{ const all=[...S.approvals.entries()].sort((a,b)=>(b[1].requestedAt||0)-(a[1].requestedAt||0));
+    const pend=all.filter(([,r])=>apStatus(r)==="pending"), hist=all.filter(([,r])=>apStatus(r)!=="pending");
+    resolveNames(all.flatMap(([,r])=>[r.requestedBy,r.decidedBy]));
+    const group=(key)=>{ const m=new Map(); hist.forEach(([,r])=>{ const k=key(r); if(!k) return; const g=m.get(k)||{approved:0,rejected:0,other:0,amt:0}; if(r.status==="approved"){ g.approved++; g.amt=r2(g.amt+r.amount); } else if(r.status==="rejected") g.rejected++; else g.other++; m.set(k,g); }); return [...m].sort((a,b)=>b[1].approved+b[1].rejected-(a[1].approved+a[1].rejected)); };
+    const byApprover=group(r=>r.status==="approved"||r.status==="rejected"?nameOf(r.decidedBy):null), byDealer=group(r=>(S.dealers.get(r.dealerId)||{}).name||"(removed)");
+    return [head("Approval requests","Credit sales staff couldn't record because of a credit hold or the credit limit.")+`
+      <div class="toolbar"><div class="seg" role="group" aria-label="Show"><button type="button" data-aptab="pending" aria-pressed="${tab==="pending"}">Waiting <span class="muted">${pend.length}</span></button><button type="button" data-aptab="history" aria-pressed="${tab==="history"}">History <span class="muted">${hist.length}</span></button></div>
+        ${downloads&&hist.length?`<button class="btn sm" type="button" id="ap-csv">Export CSV</button>`:""}</div>
+      ${tab==="pending"?(pend.length?`<ul class="crm-log">${pend.map(([id,r])=>{ const d=S.dealers.get(r.dealerId)||{name:"(removed dealer)"}; const st=status(r.dealerId); return `<li>
+        <div class="crm-meta"><b>${esc(d.name)}</b> · <b class="num">${P(r.amount)}</b> ${apPill(r)} <span class="small muted">· ${hoursLeft(r.expiresAt)}</span></div>
+        <div class="small">${esc((r.sale.items||[]).slice(0,5).map(i=>`${i.name} ×${i.qty}`).join(", "))}${r.paidMethod?` · paid on release by ${esc(r.paidMethod)}`:""}</div>
+        <div class="small muted">Asked by ${esc(nameOf(r.requestedBy))} · ${esc(fmtStamp(r.requestedAt))}</div>
+        <p style="margin:6px 0"><b>Reason:</b> ${esc(r.reason)}</p>
+        <div class="small" style="color:var(--bad)">${esc(apBlockText(r.block))}</div>
+        <div class="small muted">Now: balance ${P(st.balance)}${st.overdue?` · ${P(st.overdue)} overdue · ${st.maxLate} days late`:""}${d.creditLimit?` · limit ${P(d.creditLimit)}`:""}</div>
+        <div class="actions" style="margin-top:8px">${S.canAdmin?`<input class="ap-note" data-apnote="${id}" value="${esc(notes[id]||"")}" placeholder="Note (required to reject)" maxlength="500" style="flex:1 1 200px;min-width:0"><button class="btn sm primary" data-approve="${id}" type="button">Approve</button><button class="btn sm danger" data-reject="${id}" type="button">Reject</button>`:""}
+          ${r.requestedBy===S.me?`<button class="btn sm" data-withdraw="${id}" type="button">Withdraw</button>`:""}<button class="btn sm" data-dealer="${r.dealerId}" type="button">Dealer</button></div></li>`; }).join("")}</ul>`
+        :`<div class="empty"><p>No requests waiting.</p></div>`)
+      :(hist.length?`<div class="tbl-wrap"><table><thead><tr><th>Requested</th><th>Dealer</th><th class="r">Amount</th><th>Asked by</th><th>Result</th><th>Decided by</th></tr></thead><tbody>
+        ${hist.slice(0,200).map(([,r])=>`<tr><td class="small nowrap">${esc(fmtStamp(r.requestedAt))}</td><td>${esc((S.dealers.get(r.dealerId)||{}).name||"(removed)")}<div class="small muted">${esc(r.reason)}</div></td><td class="r num">${P(r.amount)}</td><td class="small">${esc(nameOf(r.requestedBy))}</td>
+          <td>${apPill(r)}${r.txnNo?`<div class="small">${esc(r.txnNo)}</div>`:""}${r.note?`<div class="small muted">“${esc(r.note)}”</div>`:""}</td><td class="small">${r.decidedBy&&(r.status==="approved"||r.status==="rejected")?esc(nameOf(r.decidedBy)):"—"}</td></tr>`).join("")}</tbody></table></div>
+        <div class="grid2e" style="margin-top:16px">
+          <section class="panel"><h2>By approver</h2>${byApprover.length?`<table><thead><tr><th>Approver</th><th class="r">Approved</th><th class="r">Rejected</th><th class="r">Approved amount</th></tr></thead><tbody>${byApprover.map(([k,g])=>`<tr><td>${esc(k)}</td><td class="r num">${g.approved}</td><td class="r num">${g.rejected}</td><td class="r num">${P(g.amt)}</td></tr>`).join("")}</tbody></table>`:`<p class="small muted">No decisions yet.</p>`}</section>
+          <section class="panel"><h2>By dealer</h2><table><thead><tr><th>Dealer</th><th class="r">Approved</th><th class="r">Rejected</th><th class="r">Other</th></tr></thead><tbody>${byDealer.map(([k,g])=>`<tr><td>${esc(k)}</td><td class="r num">${g.approved}</td><td class="r num">${g.rejected}</td><td class="r num">${g.other}</td></tr>`).join("")}</tbody></table></section></div>`
+        :`<div class="empty"><p>No past requests.</p></div>`)}`,sh=>{
+      $$("[data-aptab]",sh).forEach(b=>b.addEventListener("click",()=>{ tab=b.dataset.aptab; paintSheet(true); }));
+      const cv=$("#ap-csv",sh); if(cv) cv.addEventListener("click",()=>save(`approvals-${today()}.csv`,approvalsCsv(hist)));
+      $$("[data-apnote]",sh).forEach(el=>el.addEventListener("input",()=>{ notes[el.dataset.apnote]=el.value; }));
+      const note=id=>(notes[id]||"").trim();
+      $$("[data-approve]",sh).forEach(b=>b.addEventListener("click",()=>guarded(b,async()=>{ const r=await window.APP.approve(b.dataset.approve,note(b.dataset.approve)); toast(`Approved · credit sale ${r.data.txnNo} recorded`); })));
+      $$("[data-reject]",sh).forEach(b=>b.addEventListener("click",()=>{ const n=note(b.dataset.reject); if(n.length<3){ toast("Write a note telling staff why"); const el=$(`[data-apnote="${b.dataset.reject}"]`,sh); el&&el.focus(); return; }
+        guarded(b,async()=>{ await window.APP.reject(b.dataset.reject,n); toast("Request rejected"); }); }));
+      $$("[data-withdraw]",sh).forEach(b=>b.addEventListener("click",()=>{ if(armed(b,"Tap again to withdraw")) guarded(b,async()=>{ await window.APP.withdraw(b.dataset.withdraw); toast("Request withdrawn"); }); }));
+    }]; },true);
+}
+/* ---------- offline payments (FR-086) ---------- */
+const offState=()=>window.APP&&window.APP.offline?window.APP.offline():null;
+function offlineText(){ const o=offState(); if(!o) return "";
+  const n=o.pending, h=o.held.length, w=n?` · ${n} payment${n===1?"":"s"} waiting to sync`:"", r=h?` · ${h} need${h===1?"s":""} review`:"";
+  if(!o.online) return `Offline · data from ${o.lastSync?fmtStamp(o.lastSync):"this device"}${w}${r}`;
+  if(n) return `${o.syncing?"Syncing":"Waiting to sync"} ${n} payment${n===1?"":"s"}…${r}`;
+  return h?`Saved · updates live${r}`:""; }
+function offlineNotices(){ const o=offState(); if(!o) return ""; const out=[];
+  if(!o.online) out.push(`<div class="notice info"><p><b>You're offline.</b> Showing balances saved on this device${o.lastSync?` at ${esc(fmtStamp(o.lastSync))}`:""}. You can still record payments; they sync automatically when you're back online.</p></div>`);
+  if(o.held.length) out.push(`<div class="notice bad"><p><b>${o.held.length} offline payment${o.held.length===1?"":"s"} need${o.held.length===1?"s":""} review.</b> The server didn't accept ${o.held.length===1?"it":"them"} when syncing.</p><button class="btn sm" data-act="held-review" type="button">Review</button></div>`);
+  return out.join(""); }
+function heldSheet(){
+  show(()=>{ const o=offState(), held=o?o.held:[];
+    return [head("Offline payments to review","These were recorded without signal, but the server refused them when syncing.")+(held.length?`<ul class="crm-log">${held.map(h=>{ const d=S.dealers.get(h.data.dealerId); return `<li>
+        <div class="crm-meta"><b>${esc(d?d.name:"(dealer removed)")}</b> · <b class="num">${P(h.data.amount)}</b></div>
+        <div class="small muted">${fmtDate(h.data.date)} · ${esc(h.data.method||"")}${h.data.ref?" · Ref "+esc(h.data.ref):""} · recorded ${esc(fmtStamp(h.data.offline&&h.data.offline.recordedAt))}</div>
+        <div class="notice bad" style="margin:8px 0"><p class="small">${esc(h.error)}</p></div>
+        <div class="actions"><button class="btn sm" data-held-retry="${esc(h.id)}" type="button">Try again</button>${S.canAdmin?`<button class="btn sm primary" data-held-confirm="${esc(h.id)}" type="button">Record anyway</button>`:""}<button class="btn sm danger" data-held-discard="${esc(h.id)}" type="button">Discard</button></div></li>`; }).join("")}</ul><p class="small muted">“Record anyway” is for an owner or editor who has checked the payment, for example when the dealer was archived after it was collected. Discarding removes it from this device for good.</p>`
+      :`<div class="empty"><p>Nothing to review. All offline payments have synced.</p></div>`),sh=>{
+      $$("[data-held-retry]",sh).forEach(b=>b.addEventListener("click",()=>guarded(b,async()=>{ await window.APP.retryHeld(b.dataset.heldRetry,false); toast(offState().held.some(h=>h.id===b.dataset.heldRetry)?"Still refused":"Payment synced"); paintSheet(true); })));
+      $$("[data-held-confirm]",sh).forEach(b=>b.addEventListener("click",()=>guarded(b,async()=>{ await window.APP.retryHeld(b.dataset.heldConfirm,true); toast(offState().held.some(h=>h.id===b.dataset.heldConfirm)?"Still refused":"Payment recorded"); paintSheet(true); })));
+      $$("[data-held-discard]",sh).forEach(b=>b.addEventListener("click",()=>{ if(armed(b,"Tap again to discard")) guarded(b,async()=>{ await window.APP.discardHeld(b.dataset.heldDiscard); toast("Payment discarded"); paintSheet(true); }); }));
+    }]; },true);
+}
 function healthNotices(){
   const out=[];
   const nNew=[...S.orders.values()].filter(o=>o.status==="new").length, nReady=[...S.orders.values()].filter(o=>o.status==="ready").length;
   if(nNew||nReady) out.push(`<div class="notice info"><p><b>${nNew?`${nNew} new online order${nNew===1?"":"s"}`:""}${nNew&&nReady?" · ":""}${nReady?`${nReady} ready for pickup`:""}.</b> Prepare items before the dealer arrives.</p><button class="btn sm" data-act="go-orders" type="button">Open orders</button></div>`); const real=[...S.dealers.values()].some(d=>!d.sample);
   const hold=[...S.dealers.keys()].filter(id=>status(id).maxLate>holdDays()).length;
   if(hold) out.push(`<div class="notice bad"><p><b>${hold} dealer${hold===1?" is":"s are"} on credit hold</b> (more than ${holdDays()} days late). New credit sales to them are blocked until they pay.</p><button class="btn sm" data-act="go-collect" type="button">Open collection list</button></div>`);
-  const nolim=activeDealers().filter(([,d])=>!d.creditLimit).length;
+  const nolim=activeDealers().filter(([,d])=>!d.creditLimit&&!isProspect(d)).length;
   if(nolim&&S.canWrite) out.push(`<div class="notice warn"><p><b>${nolim} dealer${nolim===1?" has":"s have"} no credit limit.</b> Set one for every dealer, even a high one, so the app can stop risky releases.</p><button class="btn sm" data-act="go-dealers" type="button">Review dealers</button></div>`);
   if(S.products.size&&S.canWrite){ const last=[...S.moves.values()].filter(m=>m.reason==="Stock count").map(m=>m.date).sort().pop();
     if(!last||daysBetween(last,today())>30) out.push(`<div class="notice warn"><p><b>Monthly stock count ${last?"is due":"not done yet"}.</b> ${last?`Last count was ${fmtDate(last)}.`:"Count your stock once a month to catch missing items."}</p><button class="btn sm" data-act="count" type="button">Start stock count</button></div>`); }
@@ -783,8 +941,8 @@ function openingForm(dealerId,editId){
 }
 
 /* ---------- receipts ---------- */
-function balanceAfter(t){ let run=0; for(const [,x] of dealerTxns(t.dealerId)){ run=r2(run+(x.type==="sale"?x.amount:-x.amount)); if(x===t) return run; } return status(t.dealerId).balance; }
-const RC_TITLE={sale:"DELIVERY RECEIPT",payment:"ACKNOWLEDGEMENT RECEIPT",return:"RETURN SLIP"};
+function balanceAfter(t){ let run=0; for(const [,x] of dealerTxns(t.dealerId)){ run=r2(run+txnEffect(x)); if(x===t) return run; } return status(t.dealerId).balance; }
+const RC_TITLE={sale:"DELIVERY RECEIPT",payment:"ACKNOWLEDGEMENT RECEIPT",return:"RETURN SLIP",adjustment:"ADJUSTMENT NOTE",writeoff:"WRITE-OFF NOTE"};
 function receiptText(id){
   const t=S.txns.get(id), d=S.dealers.get(t.dealerId)||{name:"(removed dealer)"}, s=S.settings; const L=[];
   L.push(s.storeName||"Dealer Credit Ledger"); if(s.address||s.phone) L.push([s.address,s.phone].filter(Boolean).join(" · "));
@@ -794,8 +952,10 @@ function receiptText(id){
     if(t.pctDiscount||t.discount) L.push(`${t.pctDiscount?"Total at SRP":"Subtotal"}: ${P(t.subtotal)}`);
     if(t.pctDiscount) L.push(`${discLabel(t)}: −${P(t.pctDiscount)}`);
     if(t.discount) L.push(`Extra discount: −${P(t.discount)}`); }
-  L.push(t.type==="sale"?`TOTAL ON CREDIT: ${P(t.amount)}`:t.type==="payment"?`AMOUNT RECEIVED: ${P(t.amount)}`:`TOTAL CREDITED: ${P(t.amount)}`);
+  L.push(t.type==="sale"?`TOTAL ON CREDIT: ${P(t.amount)}`:t.type==="payment"?`AMOUNT RECEIVED: ${P(t.amount)}`:t.type==="adjustment"?`${t.direction==="debit"?"AMOUNT ADDED":"AMOUNT CREDITED"}: ${P(t.amount)}`:t.type==="writeoff"?`AMOUNT WRITTEN OFF: ${P(t.amount)}`:`TOTAL CREDITED: ${P(t.amount)}`);
   if(t.type==="sale") L.push(`Due date: ${fmtDate(t.dueDate)}`);
+  if(t.type==="adjustment"){ if(t.reason) L.push(`Reason: ${t.reason}`); if(t.direction==="debit"&&t.dueDate) L.push(`Due date: ${fmtDate(t.dueDate)}`); }
+  if(t.type==="writeoff"&&t.reason) L.push(`Reason: ${t.reason}`);
   if(t.type==="payment"){ L.push(`Paid by: ${t.method}${t.ref?" · Ref "+t.ref:""}`); if(t.payKind) L.push({full:"FULL PAYMENT",partial:"PARTIAL PAYMENT",advance:"ADVANCE PAYMENT"}[t.payKind]); (t.applied||[]).forEach(a=>L.push(`  ${a.no}: ${P(a.amount)}${a.left>0.004?` (${P(a.left)} still owed)`:" (fully paid)"}`)); }
   if(!t.voided) L.push(`Balance after this: ${P(balanceAfter(t))}`);
   if(t.note&&t.note!=="Opening balance") L.push(`Note: ${t.note}`);
@@ -812,14 +972,17 @@ function receiptSheet(id){
       <div class="rc-head"><div><h2>${esc(s.storeName||"Dealer Credit Ledger")}</h2><div class="small">${esc([s.address,s.phone].filter(Boolean).join(" · "))}</div></div>
         <div class="rc-title"><b>${t.opening?"OPENING BALANCE":RC_TITLE[t.type]}</b><div class="num">No. <b>${esc(t.no||"—")}</b></div><div>${fmtDate(t.date)}</div></div></div>
       ${t.voided?`<p class="rc-void">VOIDED${t.voidReason?" · "+esc(t.voidReason):""}</p>`:""}
+      ${t.offlinePending?`<p class="rc-void no-print-bg" style="color:#8a5a00">${t.offlineHeld?"NEEDS REVIEW · "+esc(t.offlineHeld):"SAVED ON THIS DEVICE · NOT YET SYNCED"}</p><p class="small">Recorded without signal. It syncs automatically when the phone is back online, and the receipt number may change.</p>`:""}
       <dl class="kv rc-kv"><dt>Dealer</dt><dd><b>${esc(d.name)}</b></dd>${d.phone?`<dt>Mobile</dt><dd>${esc(d.phone)}</dd>`:""}${d.area?`<dt>Address</dt><dd>${esc(d.area)}</dd>`:""}
         ${t.type==="sale"?`<dt>Due date</dt><dd><b>${fmtDate(t.dueDate)}</b>${d.terms!=null?` (${d.terms}-day terms)`:""}</dd>`:""}
+        ${t.type==="adjustment"?`<dt>Direction</dt><dd><b>${t.direction==="debit"?"Debit — added to balance":"Credit — deducted from balance"}</b></dd>${t.reason?`<dt>Reason</dt><dd>${esc(t.reason)}</dd>`:""}${t.direction==="debit"&&t.dueDate?`<dt>Due date</dt><dd>${fmtDate(t.dueDate)}</dd>`:""}`:""}
+        ${t.type==="writeoff"?`<dt>Reason</dt><dd><b>${esc(t.reason||"Bad debt")}</b></dd>`:""}
         ${t.type==="payment"?`<dt>Paid by</dt><dd>${esc(t.method)}${t.ref?" · Ref "+esc(t.ref):""}</dd>${t.payKind?`<dt>Payment</dt><dd><b>${{full:"Full payment",partial:"Partial payment",advance:"Advance payment"}[t.payKind]}</b></dd>`:""}`:""}</dl>
-      ${t.type==="payment"&&(t.applied||[]).length?`<table class="rc-tbl"><thead><tr><th>Applied to</th><th class="r">Paid now</th><th class="r">Still owed</th></tr></thead><tbody>${t.applied.map(a=>`<tr><td>${esc(a.no)}</td><td class="r num">${P(a.amount)}</td><td class="r num">${a.left>0.004?P(a.left):"Fully paid"}</td></tr>`).join("")}</tbody></table>`:""}
+      ${t.type==="payment"&&(t.applied||[]).length?`<table class="rc-tbl"><thead><tr><th>Applied to</th><th class="r">Paid now</th><th class="r">Still owed</th></tr></thead><tbody>${t.applied.map(a=>`<tr><td>${esc(a.no)}${a.chosen?" <small>(chosen)</small>":""}</td><td class="r num">${P(a.amount)}</td><td class="r num">${a.left>0.004?P(a.left):"Fully paid"}</td></tr>`).join("")}</tbody></table>`:""}
       ${items.length?`<table class="rc-tbl"><thead><tr><th>#</th><th>Item</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Amount</th></tr></thead><tbody>
         ${items.map((i,k)=>`<tr><td class="num">${k+1}</td><td>${esc(i.name)}${i.promo?" <small>(promo)</small>":""}${t.discountPct==null&&i.pct!=null?` <small>(less ${i.pct}%)</small>`:""}</td><td class="r num">${i.qty}</td><td class="r num">${P(i.price)}</td><td class="r num">${P(i.qty*i.price)}</td></tr>`).join("")}</tbody>
         <tfoot>${t.pctDiscount||t.discount?`<tr><td colspan="4" class="r">${t.pctDiscount?"Total at SRP":"Subtotal"}</td><td class="r num">${P(t.subtotal)}</td></tr>`:""}${t.pctDiscount?`<tr><td colspan="4" class="r">${discLabel(t)}</td><td class="r num">−${P(t.pctDiscount)}</td></tr>`:""}${t.discount?`<tr><td colspan="4" class="r">Extra discount</td><td class="r num">−${P(t.discount)}</td></tr>`:""}</tfoot></table>`:""}
-      <div class="rc-total"><span>${t.type==="sale"?"Total on credit":t.type==="payment"?"Amount received":"Total credited"}</span><b class="num">${P(t.amount)}</b></div>
+      <div class="rc-total"><span>${t.type==="sale"?"Total on credit":t.type==="payment"?"Amount received":t.type==="adjustment"?(t.direction==="debit"?"Amount added":"Amount credited"):t.type==="writeoff"?"Amount written off":"Total credited"}</span><b class="num">${P(t.amount)}</b></div>
       ${t.voided?"":`<p class="rc-bal">Balance after this: <b class="num">${P(balanceAfter(t))}</b></p>`}
       ${t.note&&t.note!=="Opening balance"?`<p class="small">Note: ${esc(t.note)}</p>`:""}
       ${t.type==="sale"&&s.paymentInfo?`<p class="small"><b>How to pay:</b> ${esc(s.paymentInfo)}</p>`:""}
@@ -896,13 +1059,15 @@ function orderSheet(id){
   show(()=>{ const o=S.orders.get(id); if(!o) return [head("Order")+`<div class="empty"><p>This order was removed.</p></div>`];
   const d=S.dealers.get(o.dealerId), st=d?status(o.dealerId):null, items=o.items||[];
   resolveNames((o.statusHistory||[]).map(h=>h.by));
-  const short=items.filter(i=>{ const p=S.products.get(i.productId); return !p||p.stock<i.qty; });
+  const short=items.filter(i=>availableStock(i.productId,id)<i.qty);
+  const backorder=o.backorder||(o.shortItems||[]).length>0;
   const open=["new","preparing","ready"].includes(o.status);
   return [head(`Order ${esc(o.no||"")} ${ordPill(o)}`,`${esc(d?d.name:"(removed dealer)")} · placed ${fmtStamp(o.createdAt)}${o.source==="portal"?" from the dealer portal":""}`)+`
     <dl class="kv"><dt>Pickup</dt><dd><b>${o.pickupDate?fmtDate(o.pickupDate):"Anytime"}</b></dd>${o.note?`<dt>Dealer's note</dt><dd>${esc(o.note)}</dd>`:""}
       ${d?`<dt>Dealer balance</dt><dd class="num">${P(st.balance)}${st.overdue?` · <span style="color:var(--bad)">${P(st.overdue)} overdue</span>`:""}</dd>`:""}${o.saleNo?`<dt>Credit sale</dt><dd><b>${esc(o.saleNo)}</b></dd>`:""}${o.cancelReason?`<dt>Cancelled</dt><dd>${esc(o.cancelReason)}</dd>`:""}</dl>
-    ${d&&st.maxLate>holdDays()&&open?`<div class="notice bad"><p><b>This dealer is on credit hold</b> (${st.maxLate} days late). Collect payment before releasing${S.canAdmin?", or approve the release":""}.</p></div>`:""}
-    ${open&&short.length?`<div class="notice warn"><p><b>Not enough stock</b> for ${short.map(i=>esc(i.name)).join(", ")}.</p></div>`:""}
+    ${open&&(o.creditHold||(st&&st.maxLate>holdDays()))?`<div class="notice bad"><p><b>Credit hold</b>${st?` — this dealer is ${st.maxLate} days late`:""}. Collect payment before releasing${S.canAdmin?", or approve the release":""}.</p></div>`:""}
+    ${o.overLimit?`<div class="notice warn"><p><b>Over the credit limit.</b> Releasing this order will take the dealer past their limit${S.canAdmin?", unless you approve it":""}.</p></div>`:""}
+    ${open&&short.length?`<div class="notice warn"><p><b>${backorder?"Backorder":"Not enough stock"}</b> for ${short.map(i=>esc(i.name)).join(", ")}. Available now: ${short.map(i=>`${esc(i.name)} ${Math.max(0,availableStock(i.productId,id))}/${i.qty}`).join(", ")}.</p></div>`:""}
     <section class="panel" style="margin-bottom:16px"><h2>Items to prepare</h2><div class="tbl-wrap"><table><thead><tr><th>#</th><th>Product</th><th class="r">Qty</th><th class="r">In stock</th><th class="r">Amount</th></tr></thead><tbody>
       ${items.map((i,k)=>{ const p=S.products.get(i.productId); const ok=p&&p.stock>=i.qty; return `<tr><td class="muted num">${k+1}</td><td><div class="prod-cell">${thumb(p,1)}<span>${esc(i.name)}</span></div></td><td class="r num"><b>${i.qty}</b></td><td class="r num">${p?(ok?p.stock:`<span class="pill bad">${p.stock}</span>`):"—"}</td><td class="r num">${P(i.qty*i.price)}</td></tr>`; }).join("")}</tbody>
       <tfoot><tr><td colspan="4" class="r">Total at SRP</td><td class="r num">${P(o.subtotal)}</td></tr><tr><td colspan="4" class="r">${discLabel(o)}</td><td class="r num">−${P(o.pctDiscount)}</td></tr><tr><td colspan="4" class="r">Estimated total</td><td class="r num">${P(o.amount)}</td></tr></tfoot></table></div></section>
@@ -976,7 +1141,7 @@ function searchSheet(){
         recent.forEach(([id,t])=>{ const d=S.dealers.get(t.dealerId); items.push({g:"Recent",ic:t.type==="payment"?"pay":t.type==="return"?"ret":"sale",l:`${t.no||""} · ${d?d.name:""}`,s:`${TYPE_LABEL[t.type]} · ${fmtDate(t.date)}`,a:P(t.amount),go:()=>txSheet(id)}); }); }
       else {
         const hit=(...f)=>f.join(" ").toLowerCase().includes(q);
-        [...S.dealers.entries()].filter(([,d])=>hit(d.name,d.phone,d.area)).slice(0,6).forEach(([id,d])=>{ const st=status(id); items.push({g:"Dealers",ic:"dealers",l:d.name,s:[d.phone,d.area].filter(Boolean).join(" · ")||"Dealer",a:P(st.balance),go:()=>dealerSheet(id)}); });
+        [...S.dealers.entries()].filter(([,d])=>hit(d.name,d.phone,d.area,d.email,...(d.tags||[]))).slice(0,6).forEach(([id,d])=>{ const st=status(id); items.push({g:"Dealers",ic:"dealers",l:d.name,s:[isProspect(d)||stageOf(d)==="lost"?STAGE_L[stageOf(d)]:"",d.phone,d.area].filter(Boolean).join(" · ")||"Dealer",a:P(st.balance),go:()=>dealerSheet(id)}); });
         [...S.orders.entries()].filter(([,o])=>{ const d=S.dealers.get(o.dealerId); return hit(o.no,d&&d.name); }).slice(0,4).forEach(([id,o])=>{ const d=S.dealers.get(o.dealerId); items.push({g:"Orders",ic:"orders",l:`${o.no} · ${d?d.name:""}`,s:ORD_L[o.status],a:P(o.amount),go:()=>orderSheet(id)}); });
         [...S.txns.entries()].filter(([,t])=>{ const d=S.dealers.get(t.dealerId); return hit(t.no,t.ref,d&&d.name); }).sort((a,b)=>(b[1].date||"").localeCompare(a[1].date||"")).slice(0,6).forEach(([id,t])=>{ const d=S.dealers.get(t.dealerId); items.push({g:"Transactions",ic:t.type==="payment"?"pay":t.type==="return"?"ret":"sale",l:`${t.no||""} · ${d?d.name:""}`,s:`${TYPE_LABEL[t.type]} · ${fmtDate(t.date)}${t.voided?" · voided":""}`,a:P(t.amount),go:()=>txSheet(id)}); });
         [...S.products.entries()].filter(([,p])=>hit(p.name,p.code,p.category)).slice(0,6).forEach(([id,p])=>items.push({g:"Products",ic:"products",l:p.name,s:`${p.stock} in stock${p.category?" · "+p.category:""}`,a:p.srp?P(p.srp):"",go:()=>S.canWrite?productForm(id):goView("products")}));
@@ -1003,12 +1168,13 @@ const money=v=>{ const n=parseFloat(String(v??"").replace(/[₱,\s]|php/gi,""));
 function catalogRows(text){
   const rows=parseTable(text); if(!rows.length) return {items:[],cols:null};
   const H=rows[0].map(h=>h.toLowerCase());
-  const find=re=>H.findIndex(h=>re.test(h));
+  const isImg=h=>/image|photo|picture|\bimg\b|pic url/.test(h);
+  const find=re=>H.findIndex(h=>re.test(h)&&!isImg(h));
   const hasHead=H.some(h=>/name|product|srp|price|code|sku|desc/.test(h));
-  const cols=hasHead?{code:find(/code|sku|item ?(no|#)/),name:find(/name|product|desc/),srp:find(/srp|retail|catalog|^price|regular/),promo:find(/promo|sale price|special/),cat:find(/categ|line|group|type/),pct:find(/disc/),from:find(/from|start/),to:find(/until|^to$|end/)}:{code:0,name:1,srp:2,cat:3,promo:4,pct:-1,from:-1,to:-1};
+  const cols=hasHead?{code:find(/code|sku|item ?(no|#)/),name:find(/name|product|desc/),srp:find(/srp|retail|catalog|^price|regular/),promo:find(/promo|sale price|special/),cat:find(/categ|line|group|type/),pct:find(/disc/),from:find(/from|start/),to:find(/until|^to$|end/),img:H.findIndex(isImg)}:{code:0,name:1,srp:2,cat:3,promo:4,pct:-1,from:-1,to:-1,img:-1};
   if(cols.srp===cols.promo) cols.promo=-1;
   const get=(r,k)=>cols[k]>=0?(r[cols[k]]??""):"";
-  const items=(hasHead?rows.slice(1):rows).map(r=>({code:get(r,"code"),name:get(r,"name"),srp:money(get(r,"srp")),promo:money(get(r,"promo")),cat:get(r,"cat"),pct:get(r,"pct")===""?null:money(get(r,"pct")),from:get(r,"from"),to:get(r,"to")})).filter(x=>x.name||x.code);
+  const items=(hasHead?rows.slice(1):rows).map(r=>({code:get(r,"code"),name:get(r,"name"),srp:money(get(r,"srp")),promo:money(get(r,"promo")),cat:get(r,"cat"),pct:get(r,"pct")===""?null:money(get(r,"pct")),from:get(r,"from"),to:get(r,"to"),img:/^https?:\/\/\S+$/i.test(get(r,"img").trim())?get(r,"img").trim():""})).filter(x=>x.name||x.code);
   return {items,cols,hasHead};
 }
 function catalogSheet(){
@@ -1016,7 +1182,7 @@ function catalogSheet(){
   const defName=t.toLocaleDateString("en-PH",{month:"long",year:"numeric"})+" catalog";
   show(()=>[head("Update catalog","Paste the new Personal Collection price list, check the changes, then apply them all at once.")+`
     <div class="form-grid">
-      <label class="f span">Price list<textarea id="c-text" rows="7" placeholder="Copy rows from Excel or Google Sheets and paste here.&#10;Columns: Code, Product name, SRP, Category, Promo price&#10;&#10;PC-1001	Dishwashing Liquid 1L	145	Home care	&#10;PC-2003	Fabric Conditioner 1L	185	Laundry	159"></textarea><span class="hint">A header row is optional. Columns are recognised by name (code, name, SRP, promo, category, discount); without headers the order above is used. You can also open a CSV file.</span></label>
+      <label class="f span">Price list<textarea id="c-text" rows="7" placeholder="Copy rows from Excel or Google Sheets and paste here.&#10;Columns: Code, Product name, SRP, Category, Promo price&#10;&#10;PC-1001	Dishwashing Liquid 1L	145	Home care	&#10;PC-2003	Fabric Conditioner 1L	185	Laundry	159"></textarea><span class="hint">A header row is optional. Columns are recognised by name (code, name, SRP, promo, category, discount, image); without headers the order above is used. Add an “Image” column with picture links to download product photos too. You can also open a CSV file.</span></label>
       <label class="f">Or open a CSV file<input id="c-file" type="file" accept=".csv,.tsv,.txt,text/csv"></label>
       <label class="f">Catalog name<input id="c-name" value="${esc(defName)}"></label>
       <label class="f">Promos start<input id="c-from" type="date" value="${m0}"></label>
@@ -1037,11 +1203,13 @@ function catalogSheet(){
       const bad=rows.filter(r=>r.st==="new"&&!(r.it.srp>0)&&!(r.it.promo>0));
       const missing=[...S.products.entries()].filter(([id,p])=>p.active!==false&&!seen.has(id));
       const c=k=>rows.filter(r=>r.st===k).length, nPromo=rows.filter(r=>r.it.promo).length;
-      plan={rows,missing};
+      const imgRows=rows.filter(r=>r.it.img&&(r.p||r.it.srp>0||r.it.promo>0)&&(!r.p||!r.p.imageId||r.p.imageLink!==r.it.img));
+      plan={rows,missing,imgRows};
       const lab={new:`<span class="pill good">New</span>`,change:`<span class="pill warn">Price change</span>`,promo:`<span class="pill sample">Promo</span>`,same:`<span class="pill neutral">No change</span>`};
       box.innerHTML=`<div class="stat-row"><div class="kpi"><div class="lbl">New products</div><div class="val num">${c("new")}</div></div><div class="kpi"><div class="lbl">Price changes</div><div class="val num">${c("change")}</div></div><div class="kpi"><div class="lbl">Promos</div><div class="val num">${nPromo}</div></div><div class="kpi"><div class="lbl">Not in catalog</div><div class="val num">${missing.length}</div></div></div>
         ${!hasHead?`<p class="small muted">No header row found, so columns were read as Code, Name, SRP, Category, Promo price.</p>`:cols.name<0&&cols.code<0?`<div class="notice bad"><p>Couldn't find a product name or code column. Add a header row like “Code, Name, SRP”.</p></div>`:""}
         ${bad.length?`<div class="notice warn"><p>${bad.length} new product${bad.length===1?" has":"s have"} no SRP and will be skipped.</p></div>`:""}
+        ${imgRows.length&&assets&&assets.fromUrl?`<label class="chk"><input type="checkbox" id="c-img" checked> Download ${imgRows.length} product picture${imgRows.length===1?"":"s"} from the Image column (only for products with no photo or a different link)</label>`:""}
         <div class="tbl-wrap" style="max-height:340px;overflow:auto"><table><thead><tr><th>Product</th><th class="r">Old SRP</th><th class="r">New SRP</th><th class="r">Promo</th><th>Change</th></tr></thead><tbody>
         ${rows.map(r=>`<tr><td><b>${esc(r.it.name||r.p&&r.p.name||"")}</b><div class="small muted">${esc([r.it.code,r.it.cat].filter(Boolean).join(" · "))}</div></td><td class="r num">${r.p&&r.p.srp?P(r.p.srp):"—"}</td><td class="r num">${r.it.srp!=null?P(r.it.srp):"—"}${r.st==="change"&&r.p.srp?`<div class="small ${r.it.srp>r.p.srp?"":"muted"}">${r.it.srp>r.p.srp?"+":""}${P(r.it.srp-r.p.srp)}</div>`:""}</td><td class="r num">${r.it.promo?P(r.it.promo):"—"}</td><td>${lab[r.st]}</td></tr>`).join("")}
         ${missing.map(([,p])=>`<tr class="void"><td><b>${esc(p.name)}</b><div class="small muted">${esc(p.code||"")}</div></td><td class="r num">${p.srp?P(p.srp):"—"}</td><td class="r">—</td><td class="r">—</td><td><span class="pill neutral">${$("#c-arch",sh).checked?"Will be archived":"Not in catalog"}</span></td></tr>`).join("")}
@@ -1062,13 +1230,19 @@ function catalogSheet(){
         if(it.pct!=null) d.discountPct=it.pct;
         if(it.promo) d.promo={price:it.promo,from:it.from||from,to:it.to||to,label:name,noDiscount:!!(p&&p.promo&&p.promo.noDiscount)};
         else if(clr&&d.promo) d.promo=null;
-        d.updated=stamp(); jobs.push([id,d]);
+        d.updated=stamp(); jobs.push([id,d,it.img&&plan.imgRows.some(r=>r.it===it)?it.img:""]);
       }
       for(const [id,p] of plan.missing){ if(arch) jobs.push([id,{...p,active:false,updated:stamp()}]); else if(clr&&p.promo) jobs.push([id,{...p,promo:null,updated:stamp()}]); }
-      const pr=$("#c-prog",sh); pr.hidden=false; let k=0;
-      for(const [id,d] of jobs){ await db.collection("products").doc(id||undefined).set(d); k++; $("i",pr).style.width=(k/jobs.length*100)+"%"; }
+      const pr=$("#c-prog",sh); pr.hidden=false; let k=0; const wantImg=!!($("#c-img",sh)&&$("#c-img",sh).checked); const pics=[];
+      const total=jobs.length+(wantImg?jobs.filter(j=>j[2]).length:0);
+      for(const [id,d,img] of jobs){ const ref=db.collection("products").doc(id||undefined); await ref.set(d); if(wantImg&&img) pics.push([ref.id,img,d.imageId||null]); k++; $("i",pr).style.width=(k/total*100)+"%"; }
+      let got=0; const failed=[];
+      for(const [pid,img,old] of pics){ btn.textContent=`Downloading pictures ${got+failed.length+1} of ${pics.length}…`;
+        try{ const up=await assets.fromUrl(img); await db.doc("products/"+pid).update({imageId:up.id,imageLink:up.source||img,updated:stamp()}); if(old) assets.delete(old).catch(()=>{}); got++; }
+        catch(e){ failed.push((S.products.get(pid)||{}).name||img); }
+        k++; $("i",pr).style.width=(k/total*100)+"%"; }
       if(S.canAdmin) await db.doc("settings/store").set({...S.settings,catalogName:name,catalogAt:now});
-      toast(`${name} applied · ${jobs.length} product${jobs.length===1?"":"s"} updated`); back();
+      toast(`${name} applied · ${jobs.length} product${jobs.length===1?"":"s"} updated${got?` · ${got} picture${got===1?"":"s"}`:""}${failed.length?` · ${failed.length} picture${failed.length===1?"":"s"} couldn't be downloaded (${failed.slice(0,3).join(", ")}${failed.length>3?"…":""})`:""}`,failed.length?"error":undefined); back();
     });
     let tmr; $("#c-text",sh).addEventListener("input",()=>{ clearTimeout(tmr); tmr=setTimeout(preview,200); });
     $("#c-arch",sh).addEventListener("change",preview);
@@ -1108,40 +1282,150 @@ const dealerOptions=sel=>{ const list=activeDealers(); if(sel&&!list.find(([id])
   return list.map(([id,d])=>`<option value="${id}" ${id===sel?"selected":""}>${esc(d.name)} — owes ${P(status(id).balance)}</option>`).join(""); };
 
 /* ---------- dealer ---------- */
-function dealerForm(id){
-  show(()=>{ const d=id?S.dealers.get(id):{name:"",phone:"",area:"",creditLimit:S.settings.defaultLimit??"",terms:S.settings.defaultTerms??30,notes:""}; const hasTx=id&&dealerTxns(id,true).length;
-  return [head(id?"Edit dealer":"New dealer")+`<form id="f" class="form-grid">
+/* ---------- dealer CRM: stages, contact log, follow-ups ---------- */
+const STAGES=["lead","contacted","interested","dealer","lost"];
+const STAGE_L={lead:"New lead",contacted:"Contacted",interested:"Interested",dealer:"Dealer",lost:"Lost"};
+const STAGE_C={lead:"neutral",contacted:"neutral",interested:"warn",dealer:"good",lost:"bad"};
+const SOURCES=["Referral","Walk-in","Facebook","Event","Recruited by a dealer","Other"];
+const KINDS=["call","visit","message","meeting","note"];
+const KIND_L={call:"Call",visit:"Visit",message:"Message",meeting:"Meeting",note:"Note"};
+const stageOf=d=>(d&&d.stage)||"dealer";
+const isProspect=d=>["lead","contacted","interested"].includes(stageOf(d));
+const stagePill=d=>`<span class="pill ${STAGE_C[stageOf(d)]}">${STAGE_L[stageOf(d)]}</span>`;
+const CRM_CACHE={key:null,map:new Map()};
+function crmInfo(id){
+  if(CRM_CACHE.key!==S._ver){ CRM_CACHE.key=S._ver; CRM_CACHE.map=new Map();
+    S.interactions.forEach((x,k)=>{ const m=CRM_CACHE.map.get(x.dealerId)||{log:[],open:[]}; m.log.push([k,x]); if(x.followUp&&!x.followUpDone) m.open.push([k,x]); CRM_CACHE.map.set(x.dealerId,m); });
+    CRM_CACHE.map.forEach(m=>{ m.log.sort((a,b)=>(b[1].date||"").localeCompare(a[1].date||"")||(b[1].createdAt||0)-(a[1].createdAt||0)); m.open.sort((a,b)=>a[1].followUp.localeCompare(b[1].followUp)); m.last=m.log[0]?m.log[0][1].date:null; m.next=m.open[0]||null; }); }
+  return CRM_CACHE.map.get(id)||{log:[],open:[],last:null,next:null};
+}
+function followUpCell(id){
+  const c=crmInfo(id), t0=today();
+  if(c.next){ const f=c.next[1].followUp; return `<span class="pill ${f<t0?"bad":f===t0?"warn":"neutral"}">${f<t0?"Overdue":f===t0?"Today":fmtDate(f)}</span>`; }
+  return c.last?`<span class="muted">Last ${fmtDate(c.last)}</span>`:`<span class="muted">—</span>`;
+}
+const telHref=p=>"tel:"+String(p||"").replace(/[^\d+]/g,"");
+function contactLinks(d){
+  const L=[]; if(d.phone){ L.push(`<a class="btn sm" href="${telHref(d.phone)}">Call</a>`,`<a class="btn sm" href="sms:${esc(String(d.phone).replace(/[^\d+]/g,""))}">Text</a>`); }
+  if(d.email) L.push(`<a class="btn sm" href="mailto:${esc(d.email)}">Email</a>`);
+  if(d.messenger&&/^https?:\/\//i.test(d.messenger)) L.push(`<a class="btn sm" href="${esc(d.messenger)}" target="_blank" rel="noopener">Messenger</a>`);
+  return L.join("");
+}
+function crmPanel(id){
+  const d=S.dealers.get(id), c=crmInfo(id), t0=today();
+  resolveNames(c.log.map(([,x])=>x.createdBy));
+  return `<section class="panel" style="margin-bottom:16px">
+    <div class="panel-head"><h2>Contact log</h2><div class="actions">${contactLinks(d)}${S.canWrite?`<button class="btn sm primary" data-act="log-contact" data-id="${id}" type="button">+ Log contact</button>`:""}</div></div>
+    <dl class="kv">
+      <dt>Stage</dt><dd>${S.canWrite?`<select id="crm-stage" data-id="${id}" aria-label="Change stage" style="width:auto;min-width:10em">${STAGES.map(s=>`<option value="${s}" ${s===stageOf(d)?"selected":""}>${STAGE_L[s]}</option>`).join("")}</select>`:stagePill(d)}</dd>
+      ${d.email?`<dt>Email</dt><dd>${esc(d.email)}</dd>`:""}${d.address?`<dt>Address</dt><dd>${esc(d.address)}</dd>`:""}${d.birthday?`<dt>Birthday</dt><dd>${fmtDate(d.birthday)}</dd>`:""}
+      ${d.source||d.referredBy?`<dt>Source</dt><dd>${esc([d.source,d.referredBy&&"referred by "+d.referredBy].filter(Boolean).join(" · "))}</dd>`:""}
+      ${(d.tags||[]).length?`<dt>Tags</dt><dd>${d.tags.map(t=>`<span class="pill neutral">${esc(t)}</span>`).join(" ")}</dd>`:""}
+      <dt>Last contact</dt><dd>${c.last?fmtDate(c.last):"Never"}</dd>
+    </dl>
+    ${c.log.length?`<ul class="crm-log">${c.log.slice(0,30).map(([k,x])=>{ const fu=x.followUp; const due=fu&&!x.followUpDone; return `<li>
+      <div class="crm-meta"><span class="pill neutral">${KIND_L[x.kind]||esc(x.kind)}</span> <b>${fmtDate(x.date)}</b> <span class="small muted">· ${esc(nameOf(x.createdBy))}</span></div>
+      ${x.outcome?`<div><b>${esc(x.outcome)}</b></div>`:""}${x.note?`<div class="small" style="white-space:pre-wrap">${esc(x.note)}</div>`:""}
+      ${fu?`<div class="small crm-fu">${due?`<span class="pill ${fu<t0?"bad":fu===t0?"warn":"neutral"}">Follow up ${fu===t0?"today":fmtDate(fu)}</span>${S.canWrite?` <button class="btn sm" data-act="fu-done" data-id="${k}" type="button">Mark done</button>`:""}`:`<span class="pill good">Followed up</span>`}</div>`:""}
+      ${S.canWrite&&(S.canAdmin||x.createdBy===S.me)?`<div class="crm-edit"><button class="btn sm" data-act="edit-contact" data-id="${k}" type="button">Edit</button></div>`:""}
+    </li>`; }).join("")}</ul>${c.log.length>30?`<p class="small muted">Showing the latest 30 of ${c.log.length}.</p>`:""}`
+    :`<p class="small muted" style="margin:0">No calls, visits or messages logged yet.</p>`}
+  </section>`;
+}
+function contactForm(dealerId,editId){
+  show(()=>{ const x=editId?S.interactions.get(editId):{dealerId,kind:"call",date:today(),outcome:"",note:"",followUp:""}; if(!x) return [head("Contact not found")];
+    const did=x.dealerId, d=S.dealers.get(did)||{name:""};
+    return [head(editId?"Edit contact":"Log contact",esc(d.name))+`<form id="f" class="form-grid">
+      <label class="f">Type<select id="c-kind">${KINDS.map(k=>`<option value="${k}" ${k===x.kind?"selected":""}>${KIND_L[k]}</option>`).join("")}</select></label>
+      <label class="f">Date<input id="c-date" type="date" required value="${esc(x.date)}" max="${today()}"></label>
+      <label class="f span">Outcome<input id="c-out" maxlength="200" value="${esc(x.outcome)}" placeholder="e.g. Promised to pay Friday · Interested in the starter kit"></label>
+      <label class="f span">Notes<textarea id="c-note" maxlength="2000" rows="4" placeholder="What was discussed">${esc(x.note)}</textarea></label>
+      <label class="f">Follow up on<input id="c-fu" type="date" value="${esc(x.followUp||"")}" min="${editId?"":today()}"><span class="hint">Leave blank if no follow-up is needed.</span></label>
+      ${!editId&&isProspect(d)?`<label class="f">Move to stage<select id="c-stage">${STAGES.map(s=>`<option value="${s}" ${s===stageOf(d)?"selected":""}>${STAGE_L[s]}</option>`).join("")}</select></label>`:""}
+      <div class="actions span"><button class="btn primary" type="submit">${editId?"Save changes":"Save contact"}</button><button class="btn" type="button" data-back>Cancel</button>
+      ${editId&&S.canAdmin?`<button class="btn danger" type="button" id="c-del" style="margin-left:auto">Delete</button>`:""}</div></form>`,sh=>{
+      $("#f",sh).addEventListener("submit",e=>{ e.preventDefault(); const btn=e.submitter||$("button[type=submit]",sh);
+        const fu=$("#c-fu",sh).value||null;
+        const data={...x,dealerId:did,kind:$("#c-kind",sh).value,date:$("#c-date",sh).value||today(),outcome:$("#c-out",sh).value.trim(),note:$("#c-note",sh).value.trim(),followUp:fu,followUpDone:fu&&fu===x.followUp?!!x.followUpDone:false,updated:stamp()};
+        if(!editId){ data.createdAt=Date.now(); data.createdBy=S.me; }
+        const st=$("#c-stage",sh)&&$("#c-stage",sh).value;
+        guarded(btn,async()=>{ await db.collection("interactions").doc(editId||undefined).set(data);
+          if(st&&st!==stageOf(d)) await db.doc("dealers/"+did).update({stage:st,updated:stamp()});
+          toast(editId?"Contact updated":fu?`Saved. Follow-up set for ${fmtDate(fu)}`:"Contact saved"); back(); });
+      });
+      const del=$("#c-del",sh); if(del) del.addEventListener("click",()=>{ if(armed(del,"Tap again to delete")) guarded(del,async()=>{ await db.doc("interactions/"+editId).delete(); toast("Contact deleted"); back(); }); });
+    }]; });
+}
+async function markFollowUpDone(id,btn){
+  await guarded(btn,async()=>{ await db.doc("interactions/"+id).update({followUpDone:true,followUpDoneAt:Date.now(),followUpDoneBy:S.me}); toast("Follow-up done"); });
+}
+function followUpsPanel(){
+  const t0=today(), t7=addDays(t0,7), rows=[];
+  S.dealers.forEach((d,id)=>{ if(d.active===false) return; crmInfo(id).open.forEach(([k,x])=>{ if(x.followUp<=t7) rows.push({id,d,k,x}); }); });
+  rows.sort((a,b)=>a.x.followUp.localeCompare(b.x.followUp));
+  const prospects=[...S.dealers.values()].filter(d=>d.active!==false&&isProspect(d)).length;
+  return `<section class="panel">
+    <div class="panel-head"><h2>Follow-ups</h2><span class="small muted">${prospects} prospect${prospects===1?"":"s"} in the pipeline</span></div>
+    ${rows.length?`<div class="tbl-wrap"><table><tbody>${rows.slice(0,12).map(({id,d,k,x})=>`<tr class="click" tabindex="0" data-dealer="${id}"><td><b>${esc(d.name)}</b> ${isProspect(d)?stagePill(d):""}<div class="small muted">${KIND_L[x.kind]} ${fmtDate(x.date)}${x.outcome?" · "+esc(x.outcome):""}</div></td>
+      <td class="small nowrap"><span class="pill ${x.followUp<t0?"bad":x.followUp===t0?"warn":"neutral"}">${x.followUp<t0?`${daysBetween(x.followUp,t0)}d overdue`:x.followUp===t0?"Today":fmtDate(x.followUp)}</span></td>
+      ${S.canWrite?`<td class="r"><button class="btn sm" data-act="fu-done" data-id="${k}" type="button">Done</button></td>`:""}</tr>`).join("")}</tbody></table></div>${rows.length>12?`<p class="small muted">And ${rows.length-12} more.</p>`:""}`
+    :`<p class="muted small" style="margin:0">No follow-ups due in the next 7 days.</p>`}
+  </section>`;
+}
+function dealerForm(id,preStage){
+  show(()=>{ const d=id?S.dealers.get(id):{name:"",phone:"",area:"",creditLimit:S.settings.defaultLimit??"",terms:S.settings.defaultTerms??30,notes:"",stage:preStage||"dealer"}; const hasTx=id&&dealerTxns(id,true).length;
+  const stg=stageOf(d), prospect=isProspect(d);
+  return [head(id?"Edit "+(prospect?"prospect":"dealer"):(prospect?"New prospect":"New dealer"),id?"":"Contact details, where they came from and their credit terms.")+`<form id="f" class="form-grid">
+    <h3 class="span form-sec">Contact</h3>
     <label class="f span">Full name<input id="d-name" required maxlength="120" value="${esc(d.name)}" placeholder="e.g. Juana Dela Cruz"></label>
     <label class="f">Mobile number<input id="d-phone" inputmode="tel" value="${esc(d.phone)}" placeholder="0917 123 4567"></label>
+    <label class="f">Email<input id="d-email" type="email" value="${esc(d.email||"")}" placeholder="name@example.com"></label>
+    <label class="f">Messenger / Facebook link<input id="d-msgr" type="url" value="${esc(d.messenger||"")}" placeholder="https://m.me/username"></label>
+    <label class="f">Birthday<input id="d-bday" type="date" value="${esc(d.birthday||"")}"></label>
     <label class="f">Area / barangay<input id="d-area" value="${esc(d.area)}" placeholder="e.g. Brgy. San Isidro, QC"></label>
+    <label class="f">Full address<input id="d-addr" value="${esc(d.address||"")}" placeholder="House no., street, city"></label>
+    <h3 class="span form-sec">Relationship</h3>
+    <label class="f">Stage<select id="d-stage">${STAGES.map(s=>`<option value="${s}" ${s===stg?"selected":""}>${STAGE_L[s]}</option>`).join("")}</select><span class="hint">Prospects become dealers automatically on their first credit sale.</span></label>
+    <label class="f">Source<select id="d-src"><option value="">—</option>${SOURCES.map(s=>`<option ${s===d.source?"selected":""}>${s}</option>`).join("")}</select></label>
+    <label class="f">Referred by<input id="d-ref" value="${esc(d.referredBy||"")}" placeholder="Name of the person who referred them"></label>
+    <label class="f">Tags<input id="d-tags" value="${esc((d.tags||[]).join(", "))}" placeholder="e.g. VIP, Weekend seller" list="d-taglist"><datalist id="d-taglist">${allTags().map(t=>`<option value="${esc(t)}">`).join("")}</datalist><span class="hint">Separate tags with commas.</span></label>
+    <h3 class="span form-sec">Credit terms</h3>
     <label class="f">Credit limit (₱)<input id="d-limit" type="number" min="0" step="0.01" value="${esc(d.creditLimit??"")}" placeholder="Blank = no limit" ${S.canAdmin?"":"disabled"}><span class="hint">${S.canAdmin?"Recommended. Sales over the limit need owner approval.":"Only the owner or an editor can set credit limits."}</span></label>
     <label class="f">Payment terms (days)<input id="d-terms" type="number" min="0" step="1" value="${esc(d.terms??30)}" ${S.canAdmin?"":"disabled"}></label>
     <label class="f">Dealer discount (%)<input id="d-pct" type="number" min="0" max="100" step="0.01" value="${esc(d.discountPct??"")}" placeholder="Store default ${storePct()}%" ${S.canAdmin?"":"disabled"}><span class="hint">Leave blank to use the store default.</span></label>
-    ${id?"":`<div class="span notice info" style="margin:0"><p class="small"><b>Already owes you money?</b> Enter what they owe now so balances and overdue days are right from day one.</p></div>
+    ${id||prospect?"":`<div class="span notice info" style="margin:0"><p class="small"><b>Already owes you money?</b> Enter what they owe now so balances and overdue days are right from day one.</p></div>
     <label class="f">Current balance owed (₱)<input id="d-ob" type="number" min="0" step="0.01" placeholder="0.00"></label>
     <label class="f">Date they took those goods<input id="d-obdate" type="date" value="${today()}"></label>`}
-    <label class="f span">Notes<textarea id="d-notes" placeholder="Collection day, referral, ID on file…">${esc(d.notes)}</textarea></label>
+    ${id?"":`<label class="f">First follow-up<input id="d-fu" type="date" min="${today()}" value="${prospect?addDays(today(),3):""}"><span class="hint">Adds a reminder to the Follow-ups list.</span></label>`}
+    <label class="f span">Notes<textarea id="d-notes" placeholder="Collection day, ID on file…">${esc(d.notes)}</textarea></label>
     <p class="err span" id="d-err" style="color:var(--bad);margin:0"></p>
-    <div class="actions span"><button class="btn primary" type="submit">${id?"Save changes":"Add dealer"}</button><button class="btn" type="button" data-back>Cancel</button>
-    ${id?(hasTx?`<button class="btn" type="button" id="d-arch" style="margin-left:auto">${d.active===false?"Restore dealer":"Archive dealer"}</button>`:`<button class="btn danger" type="button" id="d-del" style="margin-left:auto">Delete dealer</button>`):""}</div></form>`,sh=>{
+    <div class="actions span"><button class="btn primary" type="submit">${id?"Save changes":prospect?"Add prospect":"Add dealer"}</button><button class="btn" type="button" data-back>Cancel</button>
+    ${id?(hasTx?`<button class="btn" type="button" id="d-arch" style="margin-left:auto">${d.active===false?"Restore dealer":"Archive dealer"}</button>`:`<button class="btn danger" type="button" id="d-del" style="margin-left:auto">Delete ${prospect?"prospect":"dealer"}</button>`):""}</div></form>`,sh=>{
     $("#f",sh).addEventListener("submit",e=>{ e.preventDefault(); const btn=e.submitter||$("button[type=submit]",sh);
       const name=$("#d-name").value.trim(); if(!name) return;
-      const dup=[...S.dealers.entries()].find(([k,x])=>k!==id&&x.name.trim().toLowerCase()===name.toLowerCase());
-      if(dup&&!btn.dataset.ok){ $("#d-err").textContent=`A dealer named “${dup[1].name}” already exists. Press the button again to save anyway.`; btn.dataset.ok="1"; return; }
+      const phone=$("#d-phone").value.trim(), digits=phone.replace(/\D/g,"").slice(-10);
+      const dup=[...S.dealers.entries()].find(([k,x])=>k!==id&&(x.name.trim().toLowerCase()===name.toLowerCase()||(digits.length>=7&&String(x.phone||"").replace(/\D/g,"").slice(-10)===digits)));
+      if(dup&&!btn.dataset.ok){ $("#d-err").textContent=`“${dup[1].name}” already has this ${dup[1].name.trim().toLowerCase()===name.toLowerCase()?"name":"mobile number"}. Press the button again to save anyway.`; btn.dataset.ok="1"; return; }
+      const email=$("#d-email").value.trim(); if(email&&!$("#d-email").checkValidity()){ $("#d-err").textContent="That email address doesn't look right."; return; }
       const lim=$("#d-limit").value.trim();
       const base=id?{...S.dealers.get(id)}:{createdAt:Date.now(),createdBy:S.me,active:true};
-      const data={...base,name,phone:$("#d-phone").value.trim(),area:$("#d-area").value.trim(),creditLimit:lim===""?null:r2(lim),terms:Math.max(0,Math.round(Number($("#d-terms").value)||0)),discountPct:$("#d-pct").value===""?null:Math.min(100,Math.max(0,Number($("#d-pct").value))),notes:$("#d-notes").value.trim(),updated:stamp()};
+      const data={...base,name,phone,email,messenger:$("#d-msgr").value.trim(),birthday:$("#d-bday").value||null,area:$("#d-area").value.trim(),address:$("#d-addr").value.trim(),
+        stage:$("#d-stage").value,source:$("#d-src").value,referredBy:$("#d-ref").value.trim(),tags:$("#d-tags").value.split(",").map(t=>t.trim()).filter(Boolean),
+        creditLimit:lim===""?null:r2(lim),terms:Math.max(0,Math.round(Number($("#d-terms").value)||0)),discountPct:$("#d-pct").value===""?null:Math.min(100,Math.max(0,Number($("#d-pct").value))),notes:$("#d-notes").value.trim(),updated:stamp()};
       const prevLim=id?(S.dealers.get(id).creditLimit??null):undefined;
       if(prevLim!==data.creditLimit&&(data.creditLimit!=null||id)) data.limitHistory=[...(base.limitHistory||[]),{at:Date.now(),by:S.me,from:prevLim??null,to:data.creditLimit}].slice(-50);
-      const ob=id?0:r2($("#d-ob").value), obDate=id?"":($("#d-obdate").value||today());
+      const obEl=$("#d-ob"), ob=obEl?r2(obEl.value):0, obDate=obEl?($("#d-obdate").value||today()):"";
+      const fu=$("#d-fu")&&$("#d-fu").value;
       guarded(btn,async()=>{ const ref=db.collection("dealers").doc(id||undefined); await ref.set(data);
         if(ob>0) await db.collection("txns").doc().set(openingDoc(ref.id,ob,obDate,addDays(obDate,data.terms),""));
-        toast(id?"Dealer updated":ob>0?`Dealer added with ${P(ob)} opening balance`:"Dealer added"); back(); });
+        if(fu) await db.collection("interactions").doc().set({dealerId:ref.id,kind:"note",date:today(),outcome:isProspect(data)?"Added as a prospect":"Added as a dealer",note:"",followUp:fu,followUpDone:false,createdAt:Date.now(),createdBy:S.me});
+        toast(id?"Saved":ob>0?`Dealer added with ${P(ob)} opening balance`:isProspect(data)?"Prospect added":"Dealer added"); back(); });
     });
-    const del=$("#d-del",sh); if(del) del.addEventListener("click",()=>{ if(armed(del,"Tap again to delete")) guarded(del,async()=>{ await db.doc("dealers/"+id).delete(); toast("Dealer deleted"); closeAll(); }); });
+    const del=$("#d-del",sh); if(del) del.addEventListener("click",()=>{ if(armed(del,"Tap again to delete")) guarded(del,async()=>{ for(const [k] of crmInfo(id).log) await db.doc("interactions/"+k).delete(); await db.doc("dealers/"+id).delete(); toast("Deleted"); closeAll(); }); });
     const ar=$("#d-arch",sh); if(ar) ar.addEventListener("click",()=>guarded(ar,async()=>{ const on=S.dealers.get(id).active===false; await db.doc("dealers/"+id).update({active:on,updated:stamp()}); toast(on?"Dealer restored":"Dealer archived. Their history is kept."); back(); }));
   }]; });
 }
+function allTags(){ const s=new Set(); S.dealers.forEach(d=>(d.tags||[]).forEach(t=>s.add(t))); return [...s].sort((a,b)=>a.localeCompare(b)); }
 function statementText(id){
   const d=S.dealers.get(id), st=status(id), s=S.settings;
   const L=[]; if(s.storeName) L.push(s.storeName); if(s.phone||s.address) L.push([s.address,s.phone].filter(Boolean).join(" · ")); if(L.length) L.push("");
@@ -1151,6 +1435,124 @@ function statementText(id){
   if(st.lastPay) L.push(`Last payment received: ${fmtDate(st.lastPay)}`);
   if(s.paymentInfo){ L.push("","How to pay:",s.paymentInfo); }
   L.push("",s.footer??"Salamat po!"); return L.join("\n");
+}
+/* ---------- receivables aging (FR-008, FR-051) ---------- */
+const AGE_B=[["current","Not yet due"],["d30","1–30 days"],["d60","31–60 days"],["d90","61–90 days"],["d90p","Over 90 days"]];
+const ageKey=late=>!late?"current":late<=30?"d30":late<=60?"d60":late<=90?"d90":"d90p";
+// Same settlement rules as dealerStatus, using only transactions dated on or before asOf.
+// Reconciles as: sum of buckets − unapplied credit = balance.
+function agingFor(id,asOf){
+  const tx=dealerTxns(id).filter(([,t])=>(t.date||"")<=asOf), R=settle(tx), pool=R.credit;
+  const open=[], b={current:0,d30:0,d60:0,d90:0,d90p:0};
+  R.open.forEach(({id:tid,t,rem})=>{ const late=t.dueDate&&t.dueDate<asOf?daysBetween(t.dueDate,asOf):0, k=ageKey(late); b[k]=r2(b[k]+rem); open.push({tid,t,rem,late,k}); });
+  const balance=r2(tx.reduce((a,[,t])=>a+txnEffect(t),0)), total=r2(Object.values(b).reduce((a,v)=>a+v,0));
+  return {balance,open,b,total,credit:pool};
+}
+function agingReport(asOf,dealerId){
+  const rows=[...S.dealers.entries()].filter(([id])=>!dealerId||id===dealerId).map(([id,d])=>({id,d,...agingFor(id,asOf)}))
+    .filter(r=>dealerId||Math.abs(r.balance)>0.004||r.open.length).sort((a,b)=>b.total-a.total||a.d.name.localeCompare(b.d.name));
+  const tot={current:0,d30:0,d60:0,d90:0,d90p:0,total:0,credit:0,balance:0};
+  rows.forEach(r=>{ AGE_B.forEach(([k])=>tot[k]=r2(tot[k]+r.b[k])); tot.total=r2(tot.total+r.total); tot.credit=r2(tot.credit+r.credit); tot.balance=r2(tot.balance+r.balance); });
+  return {asOf,rows,tot,ok:rows.every(r=>Math.abs(r2(r.total-r.credit)-r.balance)<0.01)};
+}
+function agingCsv(R){
+  const AL=AGE_B.map(([,l])=>l);
+  return csv([["Accounts receivable aging"],["As of",R.asOf],[],
+    ["Dealer ID","Dealer",...AL,"Unapplied credit","Balance"],
+    ...R.rows.map(r=>[r.id,r.d.name,...AGE_B.map(([k])=>r.b[k]),r.credit,r.balance]),
+    ["","Total",...AGE_B.map(([k])=>R.tot[k]),R.tot.credit,R.tot.balance],[],
+    ["Dealer ID","Dealer","Transaction ID","No.","Date","Due date","Days late","Bucket","Original amount","Unpaid"],
+    ...R.rows.flatMap(r=>r.open.map(o=>[r.id,r.d.name,o.tid,o.t.no||"",o.t.date||"",o.t.dueDate||"",o.late,AGE_B.find(([k])=>k===o.k)[1],r2(o.t.amount),o.rem]))]);
+}
+function storeHead(title,lines){ const s=S.settings;
+  return `<div class="rc-head"><div><h2>${esc(storeName())}</h2><div class="small">${esc([s.address,s.phone].filter(Boolean).join(" · "))}</div></div>
+    <div class="rc-title"><b>${title}</b>${lines.map(l=>`<div>${l}</div>`).join("")}</div></div>`; }
+function agingSheet(preDealer){
+  let asOf=today(), dealer=preDealer||"", detail=!!preDealer;
+  const canPrint=!!window.APP;
+  show(()=>{ const R=agingReport(asOf,dealer), AL=AGE_B.map(([,l])=>l);
+    const opts=[...S.dealers.entries()].sort((a,b)=>a[1].name.localeCompare(b[1].name)).map(([id,d])=>`<option value="${id}" ${id===dealer?"selected":""}>${esc(d.name)}</option>`).join("");
+    return [`<div class="no-print">${head("Receivables aging","Unpaid balances grouped by how many days they are past due.")}
+      <div class="toolbar" style="margin-bottom:12px"><label class="small">As of <input type="date" id="ag-asof" value="${esc(asOf)}" max="${today()}"></label>
+        <select id="ag-dealer" aria-label="Dealer"><option value="">All dealers</option>${opts}</select>
+        <label class="small"><input type="checkbox" id="ag-detail" ${detail?"checked":""}> Show each delivery</label></div>
+      <div class="actions" style="margin-bottom:14px">${canPrint?`<button class="btn primary" type="button" id="ag-print">Print</button>`:""}${downloads?`<button class="btn" type="button" id="ag-csv">Export CSV</button>`:""}</div></div>
+      <article class="receipt">
+        ${storeHead("RECEIVABLES AGING",[`As of <b>${fmtDate(asOf)}</b>`,dealer?esc(S.dealers.get(dealer)?.name||""):"All dealers"])}
+        ${R.rows.length?`<div class="tbl-wrap"><table class="rc-tbl"><thead><tr><th>Dealer</th>${AL.map(l=>`<th class="r">${l}</th>`).join("")}<th class="r">Credit</th><th class="r">Balance</th></tr></thead><tbody>
+          ${R.rows.map(r=>`<tr><td><b>${esc(r.d.name)}</b>${r.d.active===false?` <small>(archived)</small>`:""}</td>${AGE_B.map(([k])=>`<td class="r num">${r.b[k]?P(r.b[k]):"—"}</td>`).join("")}<td class="r num">${r.credit?"−"+P(r.credit):"—"}</td><td class="r num"><b>${P(r.balance)}</b></td></tr>
+            ${detail?r.open.map(o=>`<tr class="small"><td style="padding-left:20px">${esc(o.t.no||"")} · ${fmtDate(o.t.date)}<div class="muted">Due ${fmtDate(o.t.dueDate)}${o.late?` · ${o.late} days late`:""}</div></td>${AGE_B.map(([k])=>`<td class="r num">${k===o.k?P(o.rem):""}</td>`).join("")}<td></td><td></td></tr>`).join(""):""}`).join("")}
+          </tbody><tfoot><tr><td>Total</td>${AGE_B.map(([k])=>`<td class="r num">${P(R.tot[k])}</td>`).join("")}<td class="r num">${R.tot.credit?"−"+P(R.tot.credit):"—"}</td><td class="r num"><b>${P(R.tot.balance)}</b></td></tr>
+          <tr><td>Share of unpaid</td>${AGE_B.map(([k])=>`<td class="r num">${R.tot.total?Math.round(R.tot[k]/R.tot.total*100)+"%":"—"}</td>`).join("")}<td></td><td></td></tr></tfoot></table></div>
+          <p class="small muted">Each unpaid delivery or debit adjustment sits in one column, based on its due date. Payments, returns and credits settle the oldest deliveries first. Credit is money the dealer paid in advance that isn't applied yet. Each dealer's balance = the aging columns − credit.${R.ok?"":" <b>Warning: some balances did not reconcile.</b>"}</p>`
+          :`<div class="empty"><p>No balances as of ${fmtDate(asOf)}.</p></div>`}
+      </article>`,sh=>{
+      $("#ag-asof",sh).addEventListener("change",e=>{ asOf=e.target.value||today(); paintSheet(true); });
+      $("#ag-dealer",sh).addEventListener("change",e=>{ dealer=e.target.value; if(dealer) detail=true; paintSheet(true); });
+      $("#ag-detail",sh).addEventListener("change",e=>{ detail=e.target.checked; paintSheet(true); });
+      const pr=$("#ag-print",sh); if(pr) pr.addEventListener("click",()=>window.print());
+      const cv=$("#ag-csv",sh); if(cv) cv.addEventListener("click",()=>save(`aging-${asOf}${dealer?"-"+(S.dealers.get(dealer)?.name||dealer).replace(/[^\w-]+/g,"_"):""}.csv`,agingCsv(R)));
+    }]; },true);
+}
+
+/* ---------- statement of account for a period (FR-009) ---------- */
+function stmtLabel(t){
+  if(t.opening) return "Opening balance entry";
+  if(t.type==="payment") return `Payment${t.method?" · "+t.method:""}${t.ref?" · Ref "+t.ref:""}`;
+  if(t.type==="adjustment") return `${t.direction==="debit"?"Debit":"Credit"} adjustment${t.reason?" · "+t.reason:""}`;
+  if(t.type==="writeoff") return `Write-off · ${t.reason||"Bad debt"}`;
+  if(t.type==="return") return `Return${t.saleNo?" from "+t.saleNo:""}`;
+  return TYPE_LABEL[t.type]||t.type;
+}
+function periodStatement(id,from,to){
+  const tx=dealerTxns(id); let run=0, opening=0, charges=0, credits=0; const rows=[];
+  tx.forEach(([tid,t])=>{ const e=txnEffect(t), dt=t.date||"";
+    if(dt<from){ opening=r2(opening+e); run=opening; return; } if(dt>to) return;
+    run=r2(run+e); if(e>0) charges=r2(charges+e); else credits=r2(credits-e); rows.push({tid,t,e,run}); });
+  const ag=agingFor(id,to), unpaid=new Map(ag.open.map(o=>[o.tid,o]));
+  return {from,to,opening,charges,credits,closing:r2(opening+charges-credits),rows,ag,unpaid,
+    overdue:r2(ag.open.filter(o=>o.late>0).reduce((a,o)=>a+o.rem,0))};
+}
+function periodStatementText(id,from,to){
+  const d=S.dealers.get(id), s=S.settings, R=periodStatement(id,from,to), L=[storeName()];
+  if(s.address||s.phone) L.push([s.address,s.phone].filter(Boolean).join(" · "));
+  L.push("","STATEMENT OF ACCOUNT",`Dealer: ${d.name}`,`Period: ${fmtDate(from)} – ${fmtDate(to)}`,"",`Balance brought forward: ${P(R.opening)}`);
+  R.rows.forEach(r=>{ const u=R.unpaid.get(r.tid); L.push(`${fmtDate(r.t.date)}  ${r.t.no||""} ${stmtLabel(r.t)}  ${r.e>=0?"+":"−"}${P(Math.abs(r.e))}  = ${P(r.run)}${u?`  (due ${fmtDate(r.t.dueDate)}, unpaid ${P(u.rem)})`:""}`); });
+  L.push("",`Charges: ${P(R.charges)}`,`Payments and credits: ${P(R.credits)}`,R.closing<0?`Credit in your favor: ${P(-R.closing)}`:`Closing balance: ${P(R.closing)}`);
+  if(R.overdue) L.push(`Past due as of ${fmtDate(to)}: ${P(R.overdue)}`);
+  if(R.ag.open.length){ L.push("","Unpaid deliveries:"); R.ag.open.forEach(o=>L.push(`• ${o.t.no?o.t.no+" · ":""}${fmtDate(o.t.date)} — ${P(o.rem)} (due ${fmtDate(o.t.dueDate)}${o.late?`, ${o.late} days late`:""})`)); }
+  if(s.paymentInfo) L.push("","How to pay:",s.paymentInfo);
+  L.push("",s.footer??"Salamat po!"); return L.join("\n");
+}
+function statementSheet(id){
+  const t0=today(); let to=t0, from=t0.slice(0,8)+"01";
+  const canPrint=!!window.APP;
+  show(()=>{ const d=S.dealers.get(id); if(!d) return [head("Dealer not found")];
+    const R=periodStatement(id,from,to), s=S.settings, first=(dealerTxns(id)[0]||[,{}])[1].date;
+    return [`<div class="no-print">${head("Statement of account",esc(d.name))}
+      <div class="toolbar" style="margin-bottom:12px"><label class="small">From <input type="date" id="sa-from" value="${esc(from)}" max="${esc(to)}"></label><label class="small">To <input type="date" id="sa-to" value="${esc(to)}" min="${esc(from)}" max="${t0}"></label>
+        <button class="btn sm" type="button" id="sa-all">All time</button></div>
+      <div class="actions" style="margin-bottom:14px">${canPrint?`<button class="btn primary" type="button" id="sa-print">Print</button>`:""}<button class="btn ${canPrint?"":"primary"}" type="button" id="sa-copy">Copy as text</button></div></div>
+      <article class="receipt">
+        ${storeHead("STATEMENT OF ACCOUNT",[`${fmtDate(from)} – ${fmtDate(to)}`])}
+        <dl class="kv rc-kv"><dt>Dealer</dt><dd><b>${esc(d.name)}</b></dd>${d.phone?`<dt>Mobile</dt><dd>${esc(d.phone)}</dd>`:""}${d.area?`<dt>Address</dt><dd>${esc(d.area)}</dd>`:""}${d.terms!=null?`<dt>Terms</dt><dd>${d.terms} days</dd>`:""}${d.creditLimit?`<dt>Credit limit</dt><dd>${P(d.creditLimit)}</dd>`:""}</dl>
+        <div class="tbl-wrap"><table class="rc-tbl"><thead><tr><th>Date</th><th>Details</th><th>Due</th><th class="r">Charges</th><th class="r">Credits</th><th class="r">Balance</th></tr></thead><tbody>
+          <tr><td class="nowrap">${fmtDate(from)}</td><td><i>Balance brought forward</i></td><td></td><td></td><td></td><td class="r num"><b>${P(R.opening)}</b></td></tr>
+          ${R.rows.map(r=>{ const u=R.unpaid.get(r.tid); return `<tr><td class="nowrap">${fmtDate(r.t.date)}</td><td>${esc(r.t.no||"")} ${esc(stmtLabel(r.t))}</td><td class="nowrap small">${isCharge(r.t)&&r.t.dueDate?fmtDate(r.t.dueDate)+(u?`<div><b>${P(u.rem)} unpaid</b>${u.late?` · ${u.late}d late`:""}</div>`:`<div class="muted">Paid</div>`):""}</td><td class="r num">${r.e>0?P(r.e):""}</td><td class="r num">${r.e<0?P(-r.e):""}</td><td class="r num">${P(r.run)}</td></tr>`; }).join("")}
+          ${R.rows.length?"":`<tr><td colspan="6" class="muted small">No transactions in this period.</td></tr>`}
+        </tbody><tfoot><tr><td colspan="3" class="r">Totals for the period</td><td class="r num">${P(R.charges)}</td><td class="r num">${P(R.credits)}</td><td></td></tr></tfoot></table></div>
+        <div class="rc-total"><span>${R.closing<0?"Credit in your favor":"Closing balance"} as of ${fmtDate(to)}</span><b class="num">${P(Math.abs(R.closing))}</b></div>
+        ${R.overdue?`<p class="rc-bal">Past due: <b class="num">${P(R.overdue)}</b></p>`:""}
+        ${R.ag.open.length?`<table class="rc-tbl"><thead><tr><th>Unpaid as of ${fmtDate(to)}</th><th>Due</th><th class="r">Days late</th><th class="r">Unpaid</th></tr></thead><tbody>${R.ag.open.map(o=>`<tr><td>${esc(o.t.no||"")} · ${fmtDate(o.t.date)}</td><td class="nowrap">${fmtDate(o.t.dueDate)}</td><td class="r num">${o.late||"—"}</td><td class="r num">${P(o.rem)}</td></tr>`).join("")}</tbody></table>`:""}
+        ${s.paymentInfo?`<p class="small"><b>How to pay:</b> ${esc(s.paymentInfo)}</p>`:""}
+        <p class="rc-foot">This is not an official receipt. ${esc(s.footer??"Salamat po!")}</p>
+      </article>`,sh=>{
+      $("#sa-from",sh).addEventListener("change",e=>{ from=e.target.value||from; if(from>to) to=from; paintSheet(true); });
+      $("#sa-to",sh).addEventListener("change",e=>{ to=e.target.value||to; if(to<from) from=to; paintSheet(true); });
+      $("#sa-all",sh).addEventListener("click",()=>{ from=first&&first<to?first:to; to=t0; paintSheet(true); });
+      const pr=$("#sa-print",sh); if(pr) pr.addEventListener("click",()=>window.print());
+      $("#sa-copy",sh).addEventListener("click",()=>copyText(periodStatementText(id,from,to),"Statement of account"));
+    }]; },true);
 }
 function creditHistoryPanel(id){
   const h=history(id), d=S.dealers.get(id); const lim=(d.limitHistory||[]).slice().reverse();
@@ -1178,33 +1580,35 @@ function creditHistoryPanel(id){
 }
 function dealerSheet(id){
   show(()=>{ const d=S.dealers.get(id); if(!d) return [head("Dealer not found")+`<p>This dealer was removed.</p>`];
-  const st=status(id); let run=0;
-  const all=dealerTxns(id,true).map(([tid,t])=>{ if(isLive(t)) run=r2(run+(t.type==="sale"?t.amount:-t.amount)); return {tid,t,run}; }).reverse();
+  const st=status(id); let run=0; const fresh=isProspect(d)&&!dealerTxns(id,true).length;
+  const all=dealerTxns(id,true).map(([tid,t])=>{ if(isLive(t)) run=r2(run+txnEffect(t)); return {tid,t,run}; }).reverse();
   resolveNames([d.createdBy]);
-  return [head(esc(d.name)+samplePill(d)+(d.active===false?` <span class="pill neutral">Archived</span>`:""),[d.phone,d.area,d.terms!=null?`${d.terms}-day terms`:""].filter(Boolean).map(esc).join(" · "))+`
-    <div class="stat-row">
+  return [head(esc(d.name)+" "+stagePill(d)+samplePill(d)+(d.active===false?` <span class="pill neutral">Archived</span>`:""),[d.phone,d.area,d.terms!=null?`${d.terms}-day terms`:""].filter(Boolean).map(esc).join(" · "))+`
+    ${fresh?`<div class="notice info"><p>This prospect hasn't bought on credit yet. Recording their first credit sale makes them a dealer.</p></div>`:`<div class="stat-row">
       <div class="kpi"><div class="lbl">Balance</div><div class="val num">${P(st.balance)}</div></div>
       <div class="kpi ${st.overdue?"bad":""}"><div class="lbl">Overdue</div><div class="val num">${P(st.overdue)}</div></div>
       <div class="kpi"><div class="lbl">Credit limit</div><div class="val num">${d.creditLimit?P(d.creditLimit):"None"}</div>${d.creditLimit?`<div class="sub">${P(Math.max(0,d.creditLimit-st.balance))} available</div>`:""}</div>
-    </div>
+    </div>`}
     ${st.maxLate>holdDays()?`<div class="notice bad"><p><b>On credit hold.</b> The oldest unpaid delivery is ${st.maxLate} days late. New credit sales are blocked until they pay${S.canAdmin?", unless you approve one":""}.</p></div>`:""}
-    ${!d.creditLimit&&S.canWrite?`<div class="notice warn"><p>No credit limit set for this dealer. Set one so the app can warn you before risky releases.</p></div>`:""}
-    ${S.canWrite?`<div class="actions" style="margin-bottom:16px"><button class="btn primary" data-act="sale-for" data-id="${id}" type="button">+ Credit sale</button><button class="btn" data-act="pay-for" data-id="${id}" type="button">+ Payment</button><button class="btn" data-act="ret-for" data-id="${id}" type="button">+ Return</button><button class="btn" data-act="remind-copy" data-id="${id}" type="button">Copy reminder</button><button class="btn" data-act="opening-for" data-id="${id}" type="button">+ Opening balance</button>${window.APP&&S.acct&&S.acct.role==="owner"?`<button class="btn" data-act="portal-for" data-id="${id}" type="button">Portal access</button>`:""}<button class="btn" data-act="edit-dealer" data-id="${id}" type="button">Edit dealer</button></div>`:""}
+    ${!d.creditLimit&&!fresh&&S.canWrite?`<div class="notice warn"><p>No credit limit set for this dealer. Set one so the app can warn you before risky releases.</p></div>`:""}
+    ${S.canWrite?`<div class="actions" style="margin-bottom:16px"><button class="btn primary" data-act="sale-for" data-id="${id}" type="button">+ Credit sale</button>${fresh?"":`<button class="btn" data-act="pay-for" data-id="${id}" type="button">+ Payment</button><button class="btn" data-act="ret-for" data-id="${id}" type="button">+ Return</button>${S.canAdmin?`<button class="btn" data-act="adjust-for" data-id="${id}" type="button">+ Adjustment</button><button class="btn danger" data-act="writeoff-for" data-id="${id}" type="button">+ Write-off</button>`:""}<button class="btn" data-act="remind-copy" data-id="${id}" type="button">Copy reminder</button>`}<button class="btn" data-act="opening-for" data-id="${id}" type="button">+ Opening balance</button>${window.APP&&S.acct&&S.acct.role==="owner"?`<button class="btn" data-act="portal-for" data-id="${id}" type="button">Portal access</button>`:""}<button class="btn" data-act="edit-dealer" data-id="${id}" type="button">Edit dealer</button></div>`:""}
     ${d.notes?`<p class="small"><b>Notes:</b> ${esc(d.notes)}</p>`:""}
-    <section class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>Statement to send</h2><button class="btn sm" type="button" id="copyStmt">Copy text</button></div>
-      <pre class="stmt" id="stmt">${esc(statementText(id))}</pre><p class="small muted" style="margin:6px 0 0">Paste into Messenger, Viber or SMS to remind the dealer.</p></section>
+    ${isProspect(d)?crmPanel(id):""}
+    ${fresh?"":`    <section class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>Statement to send</h2><div class="actions"><button class="btn sm" type="button" data-act="statement" data-id="${id}">Full statement</button><button class="btn sm" type="button" data-act="aging-for" data-id="${id}">Aging</button><button class="btn sm" type="button" id="copyStmt">Copy text</button></div></div>
+      <pre class="stmt" id="stmt">${esc(statementText(id))}</pre><p class="small muted" style="margin:6px 0 0">Paste into Messenger, Viber or SMS to remind the dealer.</p></section>`}
     ${(()=>{ const O=openDeliveries(id); if(!O.open.length) return ""; return `<section class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>Unpaid deliveries</h2>${S.canWrite?`<button class="btn sm primary" data-act="pay-amt" data-id="${id}" data-amt="${st.balance}" type="button">Collect full ${P(st.balance)}</button>`:""}</div>
       <div class="tbl-wrap"><table><thead><tr><th>Delivery</th><th>Due</th><th class="r">Amount</th><th class="r">Paid</th><th class="r">Left</th>${S.canWrite?"<th></th>":""}</tr></thead><tbody>
-      ${O.open.map(o=>`<tr><td><b>${esc(o.t.no||"")}</b><div class="small muted">${fmtDate(o.t.date)}</div></td><td class="small nowrap">${fmtDate(o.t.dueDate)}${o.late?`<div><span class="pill ${o.late>holdDays()?"bad":"warn"}">${o.late} days late</span></div>`:""}</td><td class="r num">${P(o.t.amount)}</td><td class="r num">${o.paid?P(o.paid):"—"}${o.paid?`<div class="meter" style="margin-left:auto;max-width:80px"><i style="width:${o.paid/o.t.amount*100}%;background:var(--good)"></i></div>`:""}</td><td class="r num"><b>${P(o.rem)}</b></td>${S.canWrite?`<td class="r"><button class="btn sm" data-act="pay-amt" data-id="${id}" data-amt="${o.rem}" type="button">Pay</button></td>`:""}</tr>`).join("")}
+      ${O.open.map(o=>`<tr><td><b>${esc(o.t.no||"")}</b><div class="small muted">${fmtDate(o.t.date)}</div></td><td class="small nowrap">${fmtDate(o.t.dueDate)}${o.late?`<div><span class="pill ${o.late>holdDays()?"bad":"warn"}">${o.late} days late</span></div>`:""}</td><td class="r num">${P(o.t.amount)}</td><td class="r num">${o.paid?P(o.paid):"—"}${o.paid?`<div class="meter" style="margin-left:auto;max-width:80px"><i style="width:${o.paid/o.t.amount*100}%;background:var(--good)"></i></div>`:""}</td><td class="r num"><b>${P(o.rem)}</b></td>${S.canWrite?`<td class="r"><button class="btn sm" data-act="pay-amt" data-id="${id}" data-amt="${o.rem}" data-did="${o.id}" type="button">Pay</button></td>`:""}</tr>`).join("")}
       </tbody></table></div><p class="small muted" style="margin:8px 0 0">Partial payments are applied to the oldest delivery first.</p></section>`; })()}
-    ${creditHistoryPanel(id)}
+    ${isProspect(d)?"":crmPanel(id)}
+    ${fresh?"":creditHistoryPanel(id)}
     <section class="panel"><h2>Ledger</h2>
       ${all.length?`<div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Details</th><th class="r">Amount</th><th class="r">Balance</th></tr></thead><tbody>
       ${all.map(({tid,t,run})=>`<tr class="click ${t.voided?"void":""}" tabindex="0" data-tx="${tid}"><td class="small nowrap">${fmtDate(t.date)}</td><td>${txDetails(t)}</td><td class="r num nowrap amt">${sign(t)}${P(t.amount)}</td><td class="r num">${t.voided?"—":P(run)}</td></tr>`).join("")}
       </tbody></table></div>`:`<div class="empty"><p>No sales or payments yet for this dealer.</p></div>`}
       ${d.createdAt>1e9?`<p class="small muted" style="margin:10px 0 0">Added ${fmtStamp(d.createdAt)} by ${esc(nameOf(d.createdBy))}</p>`:""}
     </section>`,sh=>{
-    $("#copyStmt",sh).addEventListener("click",()=>{ const el=$("#stmt",sh), txt=el.textContent;
+    const cs=$("#copyStmt",sh); if(cs) cs.addEventListener("click",()=>{ const el=$("#stmt",sh), txt=el.textContent;
       const sel=()=>{ const r=document.createRange(); r.selectNodeContents(el); const s=getSelection(); s.removeAllRanges(); s.addRange(r); toast("Text selected. Copy it from your device menu."); };
       try{ navigator.clipboard.writeText(txt).then(()=>toast("Statement copied"),sel); }catch(e){ sel(); } });
   }]; },true);
@@ -1212,7 +1616,7 @@ function dealerSheet(id){
 
 /* ---------- product ---------- */
 function productForm(id){
-  show(()=>{ const p=id?S.products.get(id):{name:"",code:"",category:"",dealerPrice:"",srp:"",stock:0,reorderLevel:5};
+  show(()=>{ const p=id?S.products.get(id):{name:"",code:"",category:"",dealerPrice:"",srp:"",cost:"",stock:0,reorderLevel:5};
   const cats=[...new Set([...S.products.values()].map(x=>x.category).filter(Boolean))].sort();
   const used=id&&[...S.txns.values()].some(t=>(t.items||[]).some(i=>i.productId===id));
   const mv=id?[...S.moves.values()].filter(m=>m.productId===id).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).slice(0,8):[];
@@ -1221,12 +1625,14 @@ function productForm(id){
       <div id="p-prev">${p.imageId?`<img class="big" src="${imgUrl(p.imageId)}" alt="Product photo">`:`<div class="big">No photo yet</div>`}</div>
       ${assets?`<div class="actions" style="flex-direction:column;align-items:flex-start;flex:1;min-width:200px"><input id="p-file" type="file" accept="image/*" aria-label="Choose product photo">${p.imageId?`<button class="btn sm" type="button" id="p-rmimg">Remove photo</button>`:""}<span class="hint">Choose a file, drag one here, or copy a picture from a website and paste it (Ctrl+V). Large photos are resized automatically.</span></div>`:`<span class="hint">Only the ledger owner or editors can add photos.</span>`}
     </div></div>
-    <label class="f span">Picture link from the internet<input id="p-link" type="url" inputmode="url" value="${esc(p.imageLink||"")}" placeholder="https://…"><span class="hint">Saved as a “View picture” link that opens in a new tab.</span></label>
+    ${assets&&assets.fromUrl?`<div class="f span"><label for="p-link">Picture from the internet</label><div class="link-row"><input id="p-link" type="url" inputmode="url" value="${esc(p.imageLink||"")}" placeholder="Paste a picture or product page link, https://…"><button class="btn" type="button" id="p-getimg">Get picture</button><button class="btn" type="button" id="p-find">Find online</button></div><span class="hint" id="p-linkh">“Find online” searches pictures of this product. Right-click a picture, copy its address, paste it here, then press Get picture. A product page link also works. Use pictures you have the right to use, such as the supplier's own.</span></div>`
+    :`<label class="f span">Picture link from the internet<input id="p-link" type="url" inputmode="url" value="${esc(p.imageLink||"")}" placeholder="https://…"><span class="hint">Saved as a “View picture” link that opens in a new tab.</span></label>`}
     <label class="f span">Product name<input id="p-name" required maxlength="160" value="${esc(p.name)}" placeholder="Name and size, e.g. Dishwashing Liquid 1L"></label>
     <label class="f">Category<input id="p-cat" list="catList" value="${esc(p.category||"")}" placeholder="e.g. Home care"><datalist id="catList">${cats.map(c=>`<option value="${esc(c)}">`).join("")}</datalist></label>
     <label class="f">Code / SKU<input id="p-code" value="${esc(p.code)}"></label>
     <label class="f">SRP / catalog price (₱)<input id="p-srp" type="number" min="0" step="0.01" value="${esc(p.srp??"")}"><span class="hint">Credit sales use this price, less the dealer discount.</span></label>
-    <label class="f">Dealer price (₱)<input id="p-dp" type="number" min="0" step="0.01" required value="${esc(p.dealerPrice)}"><span class="hint" id="p-dph">Your cost to the dealer after discount.</span></label>
+    <label class="f">Dealer price (₱)<input id="p-dp" type="number" min="0" step="0.01" required value="${esc(p.dealerPrice)}"><span class="hint" id="p-dph">Price the dealer pays after discount.</span></label>
+    <label class="f">Your cost (₱)<input id="p-cost" type="number" min="0" step="0.01" value="${esc(p.cost??"")}" placeholder="What you paid" ${S.canAdmin?"":"disabled"}><span class="hint">Used for gross profit. Only the owner or an editor can change it.</span></label>
     ${id?`<div class="f"><span>Stock on hand</span><b class="num" style="font-size:18px;color:var(--fg)">${p.stock}</b><span class="hint">Change it with Stock in / adjust.</span></div>`:`<label class="f">Starting stock<input id="p-stock" type="number" step="1" min="0" value="${esc(p.stock)}"></label>`}
     <label class="f">Reorder when at or below<input id="p-re" type="number" min="0" step="1" value="${esc(p.reorderLevel??"")}"></label>
     <label class="f">Dealer discount for this product (%)<input id="p-pct" type="number" min="0" max="100" step="0.01" value="${esc(p.discountPct??"")}" placeholder="Same as dealer's (${storePct()}%)" ${S.canAdmin?"":"disabled"}><span class="hint">Leave blank unless this item gets a different discount, e.g. 0 for net-priced items.</span></label>
@@ -1243,27 +1649,46 @@ function productForm(id){
     const srpIn=$("#p-srp",sh), dpIn=$("#p-dp",sh); let dpTouched=!!dpIn.value;
     dpIn.addEventListener("input",()=>{ dpTouched=true; });
     srpIn.addEventListener("input",()=>{ const v=r2(srpIn.value*(1-storePct()/100)); $("#p-dph",sh).textContent=srpIn.value?`SRP less ${storePct()}% = ${P(v)}`:"Your cost to the dealer after discount."; if(!dpTouched&&srpIn.value) dpIn.value=v.toFixed(2); });
-    let newFile=null, removeImg=false; const fileIn=$("#p-file",sh);
-    const setFile=f=>{ if(!f) return; if(!f.type.startsWith("image/")){ toast("Choose an image file"); if(fileIn) fileIn.value=""; return; } newFile=f; removeImg=false; $("#p-prev",sh).innerHTML=`<img class="big" src="${URL.createObjectURL(f)}" alt="New product photo">`; };
+    let newFile=null, removeImg=false, fetched=null; const fileIn=$("#p-file",sh);
+    const dropFetched=()=>{ if(fetched){ assets.delete(fetched.id).catch(()=>{}); fetched=null; } };
+    const setFile=f=>{ if(!f) return; if(!f.type.startsWith("image/")){ toast("Choose an image file"); if(fileIn) fileIn.value=""; return; } dropFetched(); newFile=f; removeImg=false; $("#p-prev",sh).innerHTML=`<img class="big" src="${URL.createObjectURL(f)}" alt="New product photo">`; };
     if(fileIn){ fileIn.addEventListener("change",()=>setFile(fileIn.files[0]));
-      sh.addEventListener("paste",e=>{ const it=[...(e.clipboardData?.items||[])].find(i=>i.type.startsWith("image/")); if(it){ e.preventDefault(); setFile(it.getAsFile()); toast("Photo pasted"); } });
+      sh.addEventListener("paste",e=>{ const it=[...(e.clipboardData?.items||[])].find(i=>i.type.startsWith("image/")); if(it){ e.preventDefault(); setFile(it.getAsFile()); toast("Photo pasted"); return; }
+        const txt=(e.clipboardData?.getData("text")||"").trim(); const li=$("#p-link",sh), gb=$("#p-getimg",sh);
+        if(gb&&/^https?:\/\/\S+$/i.test(txt)&&!(e.target.matches&&e.target.matches("input:not(#p-link),textarea"))){ e.preventDefault(); li.value=txt; getImg(); } });
       const box=$(".photo-box",sh); box.addEventListener("dragover",e=>e.preventDefault());
       box.addEventListener("drop",e=>{ e.preventDefault(); const f=[...(e.dataTransfer?.files||[])].find(x=>x.type.startsWith("image/")); if(f) setFile(f); else toast("Drop an image file. From a website, copy the image and paste it instead."); }); }
-    const rm=$("#p-rmimg",sh); if(rm) rm.addEventListener("click",()=>{ removeImg=true; newFile=null; if(fileIn) fileIn.value=""; $("#p-prev",sh).innerHTML=`<div class="big">Photo will be removed when you save</div>`; });
+    const getBtn=$("#p-getimg",sh);
+    const getImg=()=>{ const li=$("#p-link",sh), url=li.value.trim(), hint=$("#p-linkh",sh);
+      if(!/^https?:\/\//i.test(url)){ toast("Paste a link that starts with https://"); li.focus(); return; }
+      guarded(getBtn,async()=>{ getBtn.textContent="Getting picture…"; $("#p-prev",sh).innerHTML=`<div class="big">Downloading…</div>`;
+        try{ const up=await assets.fromUrl(url); dropFetched(); fetched=up; newFile=null; removeImg=false; if(fileIn) fileIn.value="";
+          if(up.source) li.value=up.source; $("#p-prev",sh).innerHTML=`<img class="big" src="${imgUrl(up.id)}" alt="Downloaded product photo">`;
+          hint.textContent=`Got the picture (${Math.max(1,Math.round(up.sizeBytes/1024))} KB). Press ${id?"Save changes":"Add product"} to keep it.`; toast("Picture downloaded"); }
+        catch(err){ const cur=fetched||(!removeImg&&!newFile&&p.imageId?{id:p.imageId}:null); $("#p-prev",sh).innerHTML=cur?`<img class="big" src="${imgUrl(cur.id)}" alt="Product photo">`:`<div class="big">No photo yet</div>`;
+          const m=err&&(err.userMsg||err.message)||"Couldn't get that picture."; hint.textContent=m; throw Object.assign(new Error(m),{userMsg:m}); }
+        finally{ getBtn.textContent="Get picture"; getBtn.disabled=false; } }); };
+    if(getBtn){ getBtn.addEventListener("click",getImg);
+      $("#p-link",sh).addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); getImg(); } });
+      $("#p-find",sh).addEventListener("click",()=>{ const q=[$("#p-name",sh).value.trim(),$("#p-code",sh).value.trim()].filter(Boolean).join(" ");
+        if(!q){ toast("Type the product name first"); $("#p-name",sh).focus(); return; }
+        window.open("https://www.google.com/search?tbm=isch&q="+encodeURIComponent(q),"_blank","noopener"); }); }
+    const rm=$("#p-rmimg",sh); if(rm) rm.addEventListener("click",()=>{ dropFetched(); removeImg=true; newFile=null; if(fileIn) fileIn.value=""; $("#p-prev",sh).innerHTML=`<div class="big">Photo will be removed when you save</div>`; });
     $("#f",sh).addEventListener("submit",e=>{ e.preventDefault(); const btn=e.submitter||$("button[type=submit]",sh);
       const name=$("#p-name").value.trim(); if(!name) return; const re=$("#p-re").value.trim(); const link=$("#p-link").value.trim();
       const base=id?{...S.products.get(id)}:{createdAt:Date.now(),createdBy:S.me,active:true,stock:Math.max(0,Math.round(Number($("#p-stock").value)||0))};
       const oldImg=base.imageId||null;
-      const data={...base,name,category:$("#p-cat").value.trim(),code:$("#p-code").value.trim(),dealerPrice:r2($("#p-dp").value),srp:$("#p-srp").value?r2($("#p-srp").value):null,reorderLevel:re===""?null:Math.max(0,Number(re)),imageLink:/^https?:\/\//i.test(link)?link:null,updated:stamp()};
+      const data={...base,name,category:$("#p-cat").value.trim(),code:$("#p-code").value.trim(),dealerPrice:r2($("#p-dp").value),cost:$("#p-cost").value===""?null:r2($("#p-cost").value),srp:$("#p-srp").value?r2($("#p-srp").value):null,reorderLevel:re===""?null:Math.max(0,Number(re)),imageLink:/^https?:\/\//i.test(link)?link:null,updated:stamp()};
       data.discountPct=$("#p-pct").value===""?null:Math.min(100,Math.max(0,Number($("#p-pct").value)));
       { const pp=r2($("#p-promo").value); data.promo=pp>0?{...(base.promo||{}),price:pp,from:$("#p-pfrom").value||null,to:$("#p-pto").value||null,noDiscount:$("#p-pnod").checked}:null; }
       if(id&&Number(base.srp||0)!==Number(data.srp||0)) data.priceHistory=[...(base.priceHistory||[]),{at:Date.now(),by:S.me,catalog:"Edited",from:base.srp??null,to:data.srp}].slice(-36);
       guarded(btn,async()=>{
         if(newFile){ btn.textContent="Uploading photo…"; try{ const up=await assets.upload(await shrinkImage(newFile)); data.imageId=up.id; }catch(err){ const m={too_large:"That photo is too large. Try a smaller one.",unsupported_type:"That file type isn't supported. Use JPG or PNG."}[err&&err.code]||"Couldn't upload the photo. Try again."; throw Object.assign(new Error(m),{userMsg:m}); } }
+        else if(fetched) data.imageId=fetched.id;
         else if(removeImg) data.imageId=null;
-        const ref=db.collection("products").doc(id||undefined); await ref.set(data);
+        const ref=db.collection("products").doc(id||undefined); await ref.set(data); fetched=null;
         if(!id&&data.stock>0) await db.collection("moves").doc().set({productId:ref.id,qty:data.stock,reason:"Starting stock",date:today(),note:"",createdAt:Date.now(),createdBy:S.me});
-        if(oldImg&&assets&&(removeImg||newFile)) assets.delete(oldImg).catch(()=>{});
+        if(oldImg&&assets&&data.imageId!==oldImg) assets.delete(oldImg).catch(()=>{});
         toast(id?"Product updated":"Product added"); back(); });
     });
     const del=$("#p-del",sh); if(del) del.addEventListener("click",()=>{ if(armed(del,"Tap again to delete")) guarded(del,async()=>{ const im=S.products.get(id).imageId; await db.doc("products/"+id).delete(); for(const [mid,m] of [...S.moves]) if(m.productId===id) await db.doc("moves/"+mid).delete(); if(im&&assets) assets.delete(im).catch(()=>{}); toast("Product deleted"); closeAll(); }); });
@@ -1300,10 +1725,20 @@ const promoOn=(p,date)=>!!(p&&p.promo&&Number(p.promo.price)>0&&(!p.promo.from||
 const listPrice=(p,pct,date)=>promoOn(p,date)?Number(p.promo.price):(pct>0?(Number(p.srp)||Number(p.dealerPrice)||0):(Number(p.dealerPrice)||Number(p.srp)||0));
 const linePct=(p,dpct,date)=>promoOn(p,date)&&p.promo.noDiscount?0:(p&&p.discountPct!=null&&p.discountPct!==""?Number(p.discountPct):dpct);
 const priceTag=(p,pct,date)=>promoOn(p,date)?`<s class="muted small">${P(p.srp)}</s> <b>${P(p.promo.price)}</b> <span class="pill warn">PROMO</span>`:P(listPrice(p,pct,date));
+function returnedQtyFor(saleId,productId,exceptId){
+  let n=0;
+  for(const [id,t] of S.txns){ if(id===exceptId||t.type!=="return"||t.saleId!==saleId||t.voided) continue;
+    (t.items||[]).forEach(i=>{ if(i.productId===productId) n+=Number(i.qty)||0; }); }
+  return n;
+}
+function saleOptions(did,sel){
+  const list=did?dealerTxns(did).filter(([,t])=>t.type==="sale"&&!t.voided).reverse():[];
+  return `<option value="">Not linked — any returned items</option>${list.map(([id,t])=>`<option value="${id}" ${id===sel?"selected":""}>${esc(t.no||"DR")} · ${fmtDate(t.date)} · ${P(t.amount)}</option>`).join("")}`;
+}
 function itemsForm(kind,dealerId,editId,opts){
   if(!activeDealers().length&&!editId){ toast("Add a dealer first"); dealerForm(); return; }
   if(!activeProducts().length&&!editId){ toast("Add a product first"); productForm(); return; }
-  const old=editId?S.txns.get(editId):null; const isSale=kind==="sale";
+  const old=editId?S.txns.get(editId):null; const isSale=kind==="sale"; const orderId=opts&&opts.orderId||null;
   show(()=>{
   const startDealer=old?old.dealerId:dealerId;
   const startPct=old?(old.discountPct??0):opts&&opts.pct!=null?opts.pct:dealerPct(S.dealers.get(startDealer));
@@ -1313,6 +1748,7 @@ function itemsForm(kind,dealerId,editId,opts){
       <label class="f">${isSale?"Date released":"Date returned"}<input id="s-date" type="date" required value="${old?old.date:today()}"></label>
       ${isSale?`<label class="f">Due date<input id="s-due" type="date" required value="${old?old.dueDate:""}"></label>`:`<label class="chk" style="align-self:end"><input type="checkbox" id="s-restock" ${!old||old.restock?"checked":""}> Put items back in stock</label>`}
     </div>
+    ${!isSale?`<label class="f span">Original delivery (optional)<select id="s-sale">${saleOptions(startDealer,old?old.saleId:"")}</select><span class="hint">Link the return to a DR. Quantities are capped at what was delivered and not yet returned.</span></label>`:""}
     <div class="panel-head" style="margin:18px 0 8px"><h3 style="font-size:15px">Items</h3><span class="small muted" id="cart-count">Tap a product to add it. Tap again to add one more.</span></div>
     <div class="picker">
       <input id="pick-q" type="search" autocomplete="off" placeholder="Search a product to add (name, code or category)" aria-label="Search products to add">
@@ -1328,16 +1764,22 @@ function itemsForm(kind,dealerId,editId,opts){
     <div id="s-warn" style="margin-top:10px"></div>
     ${isSale&&!old?`<label class="chk" id="s-ovr-wrap" hidden style="margin-top:4px"><input type="checkbox" id="s-ovr"> Release anyway (owner approval)</label>`:""}
     <div class="actions" style="margin-top:12px"><button class="btn primary" type="submit">${editId?"Save changes":isSale?"Record sale":"Record return"}</button><button class="btn" type="button" data-back>Cancel</button></div></form>`,sh=>{
-    const cart=old?(old.items||[]).map(i=>({...i,pct:i.pct!=null?i.pct:(old.discountPct??0),mp:true,pf:true})):opts&&opts.items?opts.items.map(i=>({...i,pct:i.pct!=null?i.pct:(opts.pct??0),mp:true,pf:true})):[];
+    let saleId=old?(old.saleId||""):"";
+    const maxByProduct={};
+    const seedMax=()=>{ Object.keys(maxByProduct).forEach(k=>delete maxByProduct[k]); const sale=S.txns.get(saleId); if(!sale) return;
+      (sale.items||[]).forEach(i=>{ maxByProduct[i.productId]=Math.max(0,(Number(i.qty)||0)-returnedQtyFor(saleId,i.productId,old?editId:null)); }); };
+    const cart=old?(old.items||[]).map(i=>({...i,pct:i.pct!=null?i.pct:(old.discountPct??0),mp:true,pf:true})):opts&&opts.items?opts.items.map(i=>({...i,cost:i.cost??((S.products.get(i.productId)||{}).cost),pct:i.pct!=null?i.pct:(opts.pct??0),mp:true,pf:true})):[];
+    if(saleId) seedMax();
     const sDate=()=>$("#s-date").value||today();
-    const refreshLines=()=>cart.forEach(i=>{ const p=S.products.get(i.productId); if(!p) return; if(!i.mp){ i.price=listPrice(p,pct(),sDate()); i.promo=promoOn(p,sDate()); } if(!i.pf) i.pct=linePct(p,pct(),sDate()); });
+    const refreshLines=()=>cart.forEach(i=>{ const p=S.products.get(i.productId); if(!p) return; if(!i.mp){ i.price=listPrice(p,pct(),sDate()); i.promo=promoOn(p,sDate()); } if(!i.pf) i.pct=linePct(p,pct(),sDate()); if(i.cost==null&&p.cost!=null) i.cost=Number(p.cost)||0; });
     let pctTouched=!!old||!!(opts&&opts.pct!=null);
     const prods=()=>{ const l=activeProducts(); cart.forEach(i=>{ if(!l.find(([id])=>id===i.productId)&&S.products.get(i.productId)) l.push([i.productId,S.products.get(i.productId)]); }); return l; };
     const pct=()=>Math.min(100,Math.max(0,Number($("#s-pct").value)||0));
     const uniPct=()=>{ const ps=new Set(cart.map(i=>i.pct)); return ps.size<=1?(cart.length?cart[0].pct:pct()):null; };
     const totals=()=>{ const sub=r2(cart.reduce((a,i)=>a+i.qty*i.price,0)); const pd=r2(cart.reduce((a,i)=>a+i.qty*i.price*(i.pct||0)/100,0)); const extra=isSale?Math.min(r2(sub-pd),Math.max(0,r2($("#s-disc").value))):0; return {sub,pd,extra,total:r2(sub-pd-extra)}; };
     const addProduct=(pid,qty=1)=>{ const p=S.products.get(pid); if(!p) return; const ex=cart.find(i=>i.productId===pid);
-      if(ex) ex.qty+=qty; else { cart.push({productId:pid,name:p.name,qty,price:0,pct:0}); refreshLines(); } drawCart(); drawPick(); };
+      const max=maxByProduct[pid]; if(max!=null&&(ex?ex.qty:0)>=max){ toast(max?`Only ${max} of ${p.name} can still be returned`:`${p.name} was already fully returned`); return; }
+      if(ex) ex.qty+=qty; else { cart.push({productId:pid,name:p.name,qty,price:0,pct:0,cost:Number(p.cost)||0}); refreshLines(); } drawCart(); drawPick(); };
     const drawPick=()=>{ const q=$("#pick-q").value.trim().toLowerCase();
       const list=prods().filter(([,p])=>!q||[p.name,p.code,p.category].join(" ").toLowerCase().includes(q)).slice(0,60);
       $("#pick-list").innerHTML=list.length?`<table><thead><tr><th></th><th>Product</th><th>Code</th><th class="r">Stock</th><th class="r">SRP</th><th></th></tr></thead><tbody>${list.map(([id,p])=>{ const inCart=cart.find(i=>i.productId===id);
@@ -1348,7 +1790,7 @@ function itemsForm(kind,dealerId,editId,opts){
       $("#cart-head").innerHTML=nar?`<tr><th>Product</th><th class="r">Qty</th><th class="r">Amount</th></tr>`:`<tr><th>#</th><th>Product</th><th class="r">Qty</th><th class="r">SRP each</th><th class="r">Amount</th><th><span style="position:absolute;left:-9999px">Remove</span></th></tr>`;
       $("#cart").innerHTML=cart.length?cart.map((i,k)=>{ const p=S.products.get(i.productId);
         return `<tr class="cart-row" data-k="${k}">${nar?"":`<td class="c-no num">${k+1}</td>`}
-          <td><div class="prod-cell">${nar?"":thumb(p,1)}<div><b>${esc(i.name)}</b>${i.promo?` <span class="pill warn">PROMO</span>`:""}${i.pct!==pct()?`<div class="small muted">dealer discount ${i.pct}%</div>`:""}${nar?`<div class="small muted num c-each">${P(i.price)} each</div>`:""}${p&&!p.srp&&pct()>0?`<div class="small" style="color:var(--warn)">No SRP saved. Using dealer price.</div>`:""}</div></div></td>
+          <td><div class="prod-cell">${nar?"":thumb(p,1)}<div><b>${esc(i.name)}</b>${i.promo?` <span class="pill warn">PROMO</span>`:""}${i.pct!==pct()?`<div class="small muted">dealer discount ${i.pct}%</div>`:""}${maxByProduct[i.productId]!=null?`<div class="small muted">max ${maxByProduct[i.productId]}</div>`:""}${nar?`<div class="small muted num c-each">${P(i.price)} each</div>`:""}${p&&!p.srp&&pct()>0?`<div class="small" style="color:var(--warn)">No SRP saved. Using dealer price.</div>`:""}</div></div></td>
           <td class="r"><div class="stepper"><button type="button" class="btn sm" data-dec aria-label="${i.qty>1?"One less":"Remove"} ${esc(i.name)}" title="${i.qty>1?"One less":"Remove item"}">${i.qty>1?"−":"✕"}</button><input class="num c-qty" id="cq-${k}" type="number" min="1" step="1" inputmode="numeric" value="${i.qty}" aria-label="Quantity of ${esc(i.name)}"><button type="button" class="btn sm" data-inc aria-label="One more ${esc(i.name)}">+</button></div></td>
           ${nar?"":`<td class="r"><input class="num c-price" id="cp-${k}" type="number" min="0" step="0.01" value="${i.price}" aria-label="Price each for ${esc(i.name)}"></td>`}
           <td class="r num cart-amt nowrap"><b>${P(i.qty*i.price)}</b></td>
@@ -1373,9 +1815,9 @@ function itemsForm(kind,dealerId,editId,opts){
         else if(st.overdue>0) w.push(`${esc(d.name)} has ${P(st.overdue)} overdue.`);
         if(d.creditLimit&&nb>d.creditLimit) (blockOverLimit()?hard:w).push(`This brings the balance to ${P(nb)}, over the ${P(d.creditLimit)} credit limit.`);
         if(!d.creditLimit) w.push(`${esc(d.name)} has no credit limit set.`);
-        Object.entries(diffEffect(old,{type:"sale",items:cart})).forEach(([pid,dq])=>{ const p=S.products.get(pid); if(p&&p.stock+dq<0) w.push(`Only ${p.stock} of ${esc(p.name)} in stock.`); }); }
+        Object.entries(diffEffect(old,{type:"sale",items:cart})).forEach(([pid,dq])=>{ const p=S.products.get(pid); if(p){ const avail=availableStock(pid,orderId); if(avail+dq<0) w.push(`Only ${Math.max(0,avail)} of ${esc(p.name)} available${reservedQty(orderId)[pid]?` (${reservedQty(orderId)[pid]} held for orders)`:""}.`); } }); }
       S._hard=isSale&&!old&&hard.length>0;
-      $("#s-warn").innerHTML=(S._hard?`<div class="notice bad"><p><b>Credit hold.</b> ${hard.join("<br>")}${S.canAdmin?"":"<br>Ask the owner to approve this release."}</p></div>`:"")+(w.length?`<div class="notice warn"><p>${w.join("<br>")}</p></div>`:"");
+      $("#s-warn").innerHTML=(S._hard?`<div class="notice bad"><p><b>Credit hold.</b> ${hard.join("<br>")}${S.canAdmin?"":"<br>Press Record to send this sale to the owner for approval."}</p></div>`:"")+(w.length?`<div class="notice warn"><p>${w.join("<br>")}</p></div>`:"");
       const ow=$("#s-ovr-wrap"); if(ow) ow.hidden=!(S._hard&&S.canAdmin);
       return T; };
     const setDue=()=>{ if(!isSale||old) return; const d=S.dealers.get($("#s-dealer").value); $("#s-due").value=addDays($("#s-date").value||today(),d?d.terms??30:(S.settings.defaultTerms??30)); };
@@ -1383,18 +1825,23 @@ function itemsForm(kind,dealerId,editId,opts){
     $("#pick-q").addEventListener("input",drawPick);
     $("#pick-q").addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); const b=$("#pick-list [data-pid]"); if(b){ addProduct(b.dataset.pid); $("#pick-q").value=""; drawPick(); } } });
     $("#cart").addEventListener("click",e=>{ const row=e.target.closest(".cart-row"); if(!row) return; const i=cart[row.dataset.k];
-      if(e.target.closest("[data-inc]")){ i.qty++; drawCart(); drawPick(); }
+      if(e.target.closest("[data-inc]")){ const max=maxByProduct[i.productId]; if(max!=null&&i.qty>=max){ toast(`Only ${max} can be returned`); return; } i.qty++; drawCart(); drawPick(); }
       else if(e.target.closest("[data-dec]")){ if(i.qty>1) i.qty--; else cart.splice(row.dataset.k,1); drawCart(); drawPick(); }
       else if(e.target.closest("[data-rm]")){ cart.splice(row.dataset.k,1); drawCart(); drawPick(); } });
     $("#cart").addEventListener("input",e=>{ const row=e.target.closest(".cart-row"); if(!row) return; const i=cart[row.dataset.k];
-      if(e.target.classList.contains("c-qty")) i.qty=Math.max(1,Math.round(Number(e.target.value)||1));
+      if(e.target.classList.contains("c-qty")){ const max=maxByProduct[i.productId]; i.qty=Math.max(1,Math.min(max!=null?max:Infinity,Math.round(Number(e.target.value)||1))); }
       if(e.target.classList.contains("c-price")){ i.price=Math.max(0,r2(e.target.value)); i.mp=true; const ce=$(".c-each",row); if(ce) ce.textContent=P(i.price)+" each"; } calc(); });
     $("#cart").addEventListener("change",e=>{ if(e.target.classList.contains("c-qty")) drawCart(); });
     $("#s-pct").addEventListener("input",()=>{ pctTouched=true; cart.forEach(i=>i.pf=false); refreshLines(); drawCart(); drawPick(); });
-    $("#s-dealer").addEventListener("change",()=>{ setDue(); if(!pctTouched){ $("#s-pct").value=dealerPct(S.dealers.get($("#s-dealer").value)); cart.forEach(i=>i.pf=false); refreshLines(); drawCart(); drawPick(); } else calc(); });
+    $("#s-dealer").addEventListener("change",()=>{ setDue(); if(!pctTouched){ $("#s-pct").value=dealerPct(S.dealers.get($("#s-dealer").value)); cart.forEach(i=>i.pf=false); refreshLines(); drawCart(); drawPick(); } else calc();
+      const sSel=$("#s-sale",sh); if(sSel){ const did=$("#s-dealer").value; sSel.innerHTML=saleOptions(did,saleId); const sale=S.txns.get(saleId); if(saleId&&(!sale||sale.dealerId!==did)){ saleId=""; sSel.value=""; seedMax(); } } });
     $("#s-date").addEventListener("change",()=>{ setDue(); refreshLines(); drawCart(); drawPick(); });
     if(isSale) $("#s-disc").addEventListener("input",calc);
     const paid=$("#s-paid",sh); if(paid) paid.addEventListener("change",()=>{ $("#s-method").hidden=!paid.checked; });
+    const sSel=$("#s-sale",sh);
+    if(sSel) sSel.addEventListener("change",()=>{ saleId=sSel.value; seedMax();
+      if(saleId){ const sale=S.txns.get(saleId); cart.length=0; (sale.items||[]).forEach(i=>{ const max=maxByProduct[i.productId]||0; if(max>0) cart.push({...i,qty:max,pct:i.pct!=null?i.pct:(sale.discountPct??0),mp:true,pf:true,cost:i.cost??((S.products.get(i.productId)||{}).cost)}); }); }
+      drawCart(); drawPick(); });
     refreshLines(); drawPick(); drawCart(); setDue();
     $("#f",sh).addEventListener("submit",e=>{ e.preventDefault(); const btn=e.submitter||$("button[type=submit]",sh);
       const did=$("#s-dealer").value; if(!did){ toast("Choose a dealer"); return; }
@@ -1402,12 +1849,19 @@ function itemsForm(kind,dealerId,editId,opts){
       const T=calc(); if(T.total<=0){ toast("The total must be more than zero"); return; }
       if(isSale&&$("#s-due").value<$("#s-date").value){ toast("The due date can't be before the release date"); return; }
       const approved=S._hard&&S.canAdmin&&$("#s-ovr")&&$("#s-ovr").checked;
-      if(isSale&&!old&&S._hard&&!approved){ toast(S.canAdmin?"This dealer is on credit hold. Tick “Release anyway” to approve.":"This dealer is on credit hold. Ask the owner to approve."); return; }
-      const data={...(old||{}),type:kind,dealerId:did,date:$("#s-date").value,items:cart.map(i=>({productId:i.productId,name:i.name,qty:i.qty,price:i.price,pct:i.pct,...(i.promo?{promo:true}:{})})),subtotal:T.sub,discountPct:uniPct(),pctDiscount:T.pd,amount:T.total,note:$("#s-note").value.trim()};
-      if(isSale){ data.dueDate=$("#s-due").value; data.discount=T.extra; } else data.restock=$("#s-restock").checked;
+      if(isSale&&!old&&S._hard&&!approved&&S.canAdmin){ toast("This dealer is on credit hold. Tick “Release anyway” to approve."); return; }
+      const needApproval=isSale&&!old&&S._hard&&!S.canAdmin;
+      if(!isSale&&saleId){ for(const i of cart){ const max=maxByProduct[i.productId]; if(max==null||i.qty>max){ toast(max==null?`${i.name} is not on ${S.txns.get(saleId).no||"that delivery"}`:`Only ${max} of ${i.name} can be returned`); return; } } }
+      const data={...(old||{}),type:kind,dealerId:did,date:$("#s-date").value,items:cart.map(i=>({productId:i.productId,name:i.name,qty:i.qty,price:i.price,pct:i.pct,...(i.cost!=null?{cost:r2(i.cost)}:{}),...(i.promo?{promo:true}:{})})),subtotal:T.sub,discountPct:uniPct(),pctDiscount:T.pd,amount:T.total,note:$("#s-note").value.trim()};
+      if(isSale){ data.dueDate=$("#s-due").value; data.discount=T.extra; delete data.saleId; delete data.saleNo; }
+      else { data.restock=$("#s-restock").checked; data.saleId=saleId||null; data.saleNo=saleId?((S.txns.get(saleId)||{}).no||null):null; }
+      if(isSale&&!allowNegativeStock()){ const pids=Object.entries(diffEffect(old,data)).filter(([pid,dq])=>{ const p=S.products.get(pid); return p&&availableStock(pid,orderId)+dq<0; }); if(pids.length){ const [pid,dq]=pids[0], p=S.products.get(pid); toast(`Only ${Math.max(0,availableStock(pid,orderId))} of ${p.name} available. Add stock or turn on backorders in Store.`); return; } }
       if(!old){ data.no=nextNo(kind); data.createdAt=Date.now(); data.createdBy=S.me; if(approved) data.override={by:S.me,at:Date.now()}; } else data.updated=stamp();
+      const paidM=paid&&paid.checked?$("#s-method").value:null;
+      if(needApproval){ askApproval(data,opts,paidM); return; }
       guarded(btn,async()=>{
-        const ref=db.collection("txns").doc(editId||undefined); await ref.set(data);
+        const ref=db.collection("txns").doc(editId||undefined);
+        try{ await ref.set(data); }catch(err){ if(err&&err.code==="credit_hold"&&isSale&&!old&&!S.canAdmin){ btn.disabled=false; askApproval(data,opts,paidM,err.userMsg); return; } throw err; }
         await applyStock(diffEffect(old,data));
         if(paid&&paid.checked) await db.collection("txns").doc().set({type:"payment",dealerId:did,date:data.date,amount:data.amount,method:$("#s-method").value,ref:"",note:`Paid on release ${data.no}`,no:nextNo("payment"),createdAt:Date.now()+1,createdBy:S.me});
         if(opts&&opts.orderId&&S.orders.get(opts.orderId)) await db.doc("orders/"+opts.orderId).set({...S.orders.get(opts.orderId),status:"released",saleId:ref.id,saleNo:data.no});
@@ -1418,16 +1872,19 @@ function itemsForm(kind,dealerId,editId,opts){
 }
 // Open deliveries for a dealer, optionally ignoring one payment (when editing it).
 function openDeliveries(did,exceptId){
-  const tx=dealerTxns(did).filter(([k])=>k!==exceptId).map(([k,t])=>[k,t]); let pool=0; const q=[]; const t0=today();
-  tx.forEach(([k,t])=>{ if(t.type==="sale"){ let rem=t.amount; if(pool>0.004){ const ap=Math.min(pool,rem); pool=r2(pool-ap); rem=r2(rem-ap); } if(rem>0.004) q.push({id:k,t,rem}); }
-    else { let c=t.amount; while(c>0.004&&q.length){ const o=q[0]; const ap=Math.min(c,o.rem); o.rem=r2(o.rem-ap); c=r2(c-ap); if(o.rem<=0.004) q.shift(); } pool=r2(pool+c); } });
-  return {open:q.map(o=>({...o,paid:r2(o.t.amount-o.rem),late:o.t.dueDate&&o.t.dueDate<t0?daysBetween(o.t.dueDate,t0):0})),credit:pool};
+  const t0=today(), R=settle(dealerTxns(did).filter(([k])=>k!==exceptId));
+  return {open:R.open.map(o=>({...o,paid:r2(o.t.amount-o.rem),late:o.t.dueDate&&o.t.dueDate<t0?daysBetween(o.t.dueDate,t0):0})),credit:R.credit};
 }
-function allocate(open,amount){ let c=r2(amount); const out=[]; for(const o of open){ if(c<=0.004) break; const ap=Math.min(c,o.rem); c=r2(c-ap); out.push({no:o.t.no||"",id:o.id,amount:r2(ap),left:r2(o.rem-ap),cleared:o.rem-ap<=0.004}); } return {lines:out,extra:c}; }
+// Chosen deliveries (picks: Map id→amount) are paid first, then the oldest unpaid ones.
+function allocate(open,amount,picks){ let c=r2(amount); const rem=new Map(open.map(o=>[o.id,o.rem])), by=new Map();
+  const take=(o,want)=>{ const ap=r2(Math.min(want,rem.get(o.id),c)); if(ap<=0) return; rem.set(o.id,r2(rem.get(o.id)-ap)); c=r2(c-ap); by.set(o.id,r2((by.get(o.id)||0)+ap)); };
+  if(picks) for(const [id,want] of picks){ const o=open.find(x=>x.id===id); if(o) take(o,Number(want)||0); }
+  for(const o of open){ if(c<=0.004) break; take(o,c); }
+  return {lines:open.filter(o=>by.has(o.id)).map(o=>({no:o.t.no||"",id:o.id,amount:by.get(o.id),left:rem.get(o.id),cleared:rem.get(o.id)<=0.004,chosen:!!(picks&&picks.has(o.id))})),extra:c}; }
 function paymentForm(dealerId,editId,preset){
   if(!activeDealers().length&&!editId){ toast("Add a dealer first"); dealerForm(); return; }
   const old=editId?S.txns.get(editId):null;
-  show(()=>[head(editId?`Edit payment ${esc(old.no||"")}`:"Payment received","Full or partial. It's applied to the oldest unpaid delivery first.")+`<form id="f" class="form-grid">
+  show(()=>[head(editId?`Edit payment ${esc(old.no||"")}`:"Payment received","Full or partial. It pays the oldest unpaid delivery first, or the deliveries you choose.")+`<form id="f" class="form-grid">
     <label class="f span">Dealer<select id="y-dealer" required><option value="">Choose dealer…</option>${dealerOptions(old?old.dealerId:dealerId)}</select></label>
     <div class="span" id="y-quick"></div>
     <label class="f">Amount received (₱)<input id="y-amt" type="number" min="0.01" step="0.01" required inputmode="decimal" value="${old?old.amount:preset&&preset.amount?preset.amount:""}"></label>
@@ -1435,21 +1892,39 @@ function paymentForm(dealerId,editId,preset){
     <label class="f">Method<select id="y-method">${METHODS.map(m=>`<option ${old&&old.method===m?"selected":""}>${m}</option>`).join("")}</select></label>
     <label class="f">Reference no.<input id="y-ref" value="${esc(old?old.ref:"")}" placeholder="GCash / bank ref, check no."></label>
     <label class="f span">Note<input id="y-note" value="${esc(old?old.note:"")}"></label>
+    <div class="span" id="y-pick"></div>
     <div class="span" id="y-alloc"></div>
     <div class="actions span"><button class="btn primary" type="submit" id="y-go">${editId?"Save changes":"Record payment"}</button><button class="btn" type="button" data-back>Cancel</button></div></form>`,sh=>{
     let O={open:[],credit:0};
     const amt=()=>r2($("#y-amt").value);
+    // FR-085: pay chosen deliveries instead of oldest-first.
+    let pickOn=!!((old&&old.alloc&&old.alloc.length)||(preset&&preset.deliveryId)), pickDealer=old?old.dealerId:dealerId;
+    const picks=new Map(old&&old.alloc?old.alloc.map(a=>[a.id,a.amount]):preset&&preset.deliveryId?[[preset.deliveryId,r2(preset.amount)]]:[]);
+    const pickSum=()=>r2([...picks.values()].reduce((a,v)=>a+(Number(v)||0),0));
+    const pickBox=()=>{ const box=$("#y-pick",sh); if(!$("#y-dealer").value||!O.open.length){ box.innerHTML=""; return; }
+      for(const k of [...picks.keys()]) if(!O.open.some(o=>o.id===k)) picks.delete(k);
+      box.innerHTML=`<label class="chk"><input type="checkbox" id="y-pickon" ${pickOn?"checked":""}> Choose which deliveries this payment is for</label>
+        ${pickOn?`<div class="alloc" style="margin-top:8px">${O.open.map(o=>`<div class="alloc-r"><label class="chk" style="flex:1;min-width:0"><input type="checkbox" data-pick="${o.id}" ${picks.has(o.id)?"checked":""}> <span><b>${esc(o.t.no||"")}</b> <span class="muted small">due ${fmtDate(o.t.dueDate)} · ${P(o.rem)} unpaid</span></span></label>
+          <input type="number" class="pick-amt" data-pamt="${o.id}" min="0.01" step="0.01" max="${o.rem}" inputmode="decimal" value="${picks.has(o.id)?picks.get(o.id):""}" ${picks.has(o.id)?"":"disabled"} aria-label="Amount for ${esc(o.t.no||"this delivery")}"></div>`).join("")}
+          <p class="small muted" style="margin:6px 0 0">Any amount not assigned here pays the oldest unpaid delivery.</p></div>`:""}`; };
+    $("#y-pick",sh).addEventListener("change",e=>{ const t=e.target;
+      if(t.id==="y-pickon"){ pickOn=t.checked; if(!pickOn) picks.clear(); pickBox(); alloc(); return; }
+      if(t.dataset.pick){ const o=O.open.find(x=>x.id===t.dataset.pick); if(t.checked){ const free=r2(amt()-pickSum()); picks.set(o.id,free>0?Math.min(free,o.rem):o.rem); } else picks.delete(o.id);
+        if(!(amt()>0)||amt()<pickSum()) $("#y-amt").value=pickSum().toFixed(2);
+        pickBox(); alloc(); } });
+    $("#y-pick",sh).addEventListener("input",e=>{ const id=e.target.dataset.pamt; if(id){ picks.set(id,r2(e.target.value)); alloc(); } });
     const quick=()=>{ const did=$("#y-dealer").value; if(!did){ $("#y-quick").innerHTML=""; $("#y-alloc").innerHTML=""; return; }
-      O=openDeliveries(did,editId); const bal=r2(O.open.reduce((a,o)=>a+o.rem,0)-O.credit), over=r2(O.open.filter(o=>o.late).reduce((a,o)=>a+o.rem,0));
+      O=openDeliveries(did,editId); if(did!==pickDealer){ picks.clear(); pickDealer=did; } const bal=r2(O.open.reduce((a,o)=>a+o.rem,0)-O.credit), over=r2(O.open.filter(o=>o.late).reduce((a,o)=>a+o.rem,0));
       const chips=[]; if(bal>0) chips.push(["Full balance",bal]); if(over>0&&over<bal) chips.push(["Overdue only",over]); if(O.open[0]&&O.open.length>1) chips.push([`Oldest ${O.open[0].t.no||"delivery"}`,O.open[0].rem]);
       $("#y-quick").innerHTML=`<div class="f"><span>${bal>0?`Owes <b class="num" style="color:var(--fg)">${P(bal)}</b>${over?` · <span style="color:var(--bad)">${P(over)} overdue</span>`:""}`:bal<0?`Has <b>${P(-bal)}</b> credit`:"Nothing owed right now"}</span>
         ${chips.length?`<div class="chips">${chips.map(([l,v])=>`<button type="button" class="chip" data-amt="${v}" aria-pressed="${amt()===v}">${l}<b class="num">${P(v)}</b></button>`).join("")}<span class="small muted" style="align-self:center">or type any partial amount below</span></div>`:""}</div>`;
-      alloc(); };
+      pickBox(); alloc(); };
     const alloc=()=>{ const a=amt(); $$(".chip",sh).forEach(c=>c.setAttribute("aria-pressed",String(Number(c.dataset.amt)===a)));
-      if(!$("#y-dealer").value||!(a>0)){ $("#y-alloc").innerHTML=O.open.length?`<div class="alloc"><div class="alloc-h">Unpaid deliveries</div>${O.open.map(o=>`<div class="alloc-r"><span><b>${esc(o.t.no||"")}</b> <span class="muted small">due ${fmtDate(o.t.dueDate)}</span>${o.paid?` <span class="small muted">· ${P(o.paid)} paid</span>`:""}</span><span class="num">${P(o.rem)}</span></div>`).join("")}</div>`:""; return; }
-      const R=allocate(O.open,a), bal=r2(O.open.reduce((x,o)=>x+o.rem,0)-O.credit), full=a>=bal-0.004&&bal>0;
+      if(!$("#y-dealer").value||!(a>0)){ $("#y-alloc").innerHTML=O.open.length&&!pickOn?`<div class="alloc"><div class="alloc-h">Unpaid deliveries</div>${O.open.map(o=>`<div class="alloc-r"><span><b>${esc(o.t.no||"")}</b> <span class="muted small">due ${fmtDate(o.t.dueDate)}</span>${o.paid?` <span class="small muted">· ${P(o.paid)} paid</span>`:""}</span><span class="num">${P(o.rem)}</span></div>`).join("")}</div>`:""; return; }
+      const R=allocate(O.open,a,pickOn?picks:null), bal=r2(O.open.reduce((x,o)=>x+o.rem,0)-O.credit), full=a>=bal-0.004&&bal>0, over=pickOn&&pickSum()>a+0.004;
       $("#y-alloc").innerHTML=`<div class="alloc"><div class="alloc-h">${full?`<span class="pill good">Full payment</span> Clears the whole balance`:bal>0?`<span class="pill warn">Partial payment</span> ${P(r2(bal-a))} will still be owed`:`<span class="pill neutral">Advance payment</span> Kept as credit for the next delivery`}</div>
-        ${R.lines.map(l=>{ const o=O.open.find(x=>x.id===l.id); return `<div class="alloc-r"><span><b>${esc(l.no)}</b> <span class="muted small">due ${fmtDate(o.t.dueDate)}</span><br><span class="small ${l.cleared?"":"muted"}">${l.cleared?"✓ Fully paid":`${P(l.amount)} of ${P(o.rem)} · ${P(l.left)} left`}</span></span><span class="num">−${P(l.amount)}</span></div>`; }).join("")}
+        ${R.lines.map(l=>{ const o=O.open.find(x=>x.id===l.id); return `<div class="alloc-r"><span><b>${esc(l.no)}</b> <span class="muted small">due ${fmtDate(o.t.dueDate)}</span>${l.chosen?` <span class="pill neutral">chosen</span>`:""}<br><span class="small ${l.cleared?"":"muted"}">${l.cleared?"✓ Fully paid":`${P(l.amount)} of ${P(o.rem)} · ${P(l.left)} left`}</span></span><span class="num">−${P(l.amount)}</span></div>`; }).join("")}
+        ${over?`<div class="notice bad" style="margin:8px 0 0"><p class="small">The chosen deliveries add up to ${P(pickSum())}, more than the ${P(a)} received.</p></div>`:""}
         ${R.extra>0.004?`<div class="alloc-r"><span>Extra kept as credit</span><span class="num">${P(R.extra)}</span></div>`:""}</div>`;
       $("#y-go").textContent=editId?"Save changes":`Record ${full?"full":bal>0?"partial":""} payment ${P(a)}`.replace("  "," "); };
     $("#y-dealer").addEventListener("change",quick); $("#y-amt").addEventListener("input",alloc);
@@ -1457,13 +1932,61 @@ function paymentForm(dealerId,editId,preset){
     quick();
     $("#f",sh).addEventListener("submit",e=>{ e.preventDefault(); const btn=e.submitter||$("button[type=submit]",sh);
       const did=$("#y-dealer").value, amount=amt(); if(!did||amount<=0){ toast("Enter the dealer and amount"); return; }
-      const O2=openDeliveries(did,editId), R=allocate(O2.open,amount), bal=r2(O2.open.reduce((x,o)=>x+o.rem,0)-O2.credit);
+      const O2=openDeliveries(did,editId), usePicks=pickOn&&picks.size>0, R=allocate(O2.open,amount,usePicks?picks:null), bal=r2(O2.open.reduce((x,o)=>x+o.rem,0)-O2.credit);
+      if(usePicks&&pickSum()>amount+0.004){ toast("The chosen deliveries add up to more than the amount received","error"); return; }
+      for(const [k,v] of picks){ const o=O2.open.find(x=>x.id===k); if(usePicks&&o&&v>o.rem+0.004){ toast(`Only ${P(o.rem)} is unpaid on ${o.t.no||"that delivery"}`,"error"); return; } }
       const data={...(old||{}),type:"payment",dealerId:did,date:$("#y-date").value,amount,method:$("#y-method").value,ref:$("#y-ref").value.trim(),note:$("#y-note").value.trim(),
-        payKind:amount>=bal-0.004&&bal>0?"full":bal>0?"partial":"advance",applied:R.lines.map(l=>({no:l.no,amount:l.amount,left:l.left})),balanceBefore:bal};
+        payKind:amount>=bal-0.004&&bal>0?"full":bal>0?"partial":"advance",applied:R.lines.map(l=>({no:l.no,amount:l.amount,left:l.left,...(l.chosen?{chosen:true}:{})})),balanceBefore:bal};
+      if(usePicks) data.alloc=[...picks].filter(([,v])=>v>0).map(([id,v])=>({id,amount:r2(v)})); else delete data.alloc;
       if(!old){ data.no=nextNo("payment"); data.createdAt=Date.now(); data.createdBy=S.me; } else data.updated=stamp();
       guarded(btn,async()=>{ const ref=db.collection("txns").doc(editId||undefined); await ref.set(data); toast(editId?"Payment updated":`${data.payKind==="full"?"Full":data.payKind==="partial"?"Partial":"Advance"} payment ${data.no} recorded`); if(editId) back(); else { stack.pop(); receiptSheet(ref.id); } });
     });
   }]);
+}
+function adjustmentForm(dealerId,editId){
+  if(!activeDealers().length&&!editId){ toast("Add a dealer first"); dealerForm(); return; }
+  const old=editId?S.txns.get(editId):null;
+  show(()=>[head(editId?`Edit adjustment ${esc(old.no||"")}`:"Adjustment","Add a debit or credit that is not a sale, payment or return.")+`<form id="f" class="form-grid">
+    <label class="f span">Dealer<select id="a-dealer" required><option value="">Choose dealer…</option>${dealerOptions(old?old.dealerId:dealerId)}</select></label>
+    <label class="f">Direction<select id="a-dir"><option value="debit" ${old&&old.direction==="debit"?"selected":""}>Debit — increases what the dealer owes</option><option value="credit" ${old&&old.direction==="credit"?"selected":""}>Credit — reduces what the dealer owes</option></select></label>
+    <label class="f">Amount (₱)<input id="a-amt" type="number" min="0.01" step="0.01" required value="${old?old.amount:""}"></label>
+    <label class="f">Date<input id="a-date" type="date" required value="${old?old.date:today()}"></label>
+    <label class="f" id="a-duewrap">Due date<input id="a-due" type="date" value="${old?(old.dueDate||""):""}"><span class="hint">Optional. A debit with a due date counts as overdue like a delivery.</span></label>
+    <label class="f span">Reason<input id="a-reason" maxlength="160" value="${esc(old?old.reason:"")}" placeholder="e.g. freight, correction, goodwill credit"></label>
+    <label class="f span">Note<input id="a-note" value="${esc(old?old.note:"")}"></label>
+    <div class="actions span"><button class="btn primary" type="submit">${old?"Save changes":"Record adjustment"}</button><button class="btn" type="button" data-back>Cancel</button></div></form>`,sh=>{
+    const sync=()=>{ $("#a-duewrap",sh).hidden=$("#a-dir",sh).value!=="debit"; }; $("#a-dir",sh).addEventListener("change",sync); sync();
+    $("#f",sh).addEventListener("submit",e=>{ e.preventDefault(); const btn=e.submitter||$("button[type=submit]",sh);
+      const did=$("#a-dealer").value, amount=r2($("#a-amt").value), direction=$("#a-dir").value;
+      if(!did||amount<=0){ toast("Choose the dealer and enter an amount"); return; }
+      const data={...(old||{}),type:"adjustment",dealerId:did,direction,amount,date:$("#a-date").value,dueDate:direction==="debit"?($("#a-due").value||null):null,reason:$("#a-reason").value.trim(),note:$("#a-note").value.trim()};
+      if(!old){ data.no=nextNo("adjustment"); data.createdAt=Date.now(); data.createdBy=S.me; } else data.updated=stamp();
+      guarded(btn,async()=>{ await db.collection("txns").doc(editId||undefined).set(data); toast(old?"Adjustment updated":"Adjustment recorded"); back(); });
+    });
+  }]);
+}
+function writeoffForm(dealerId,editId){
+  if(!activeDealers().length&&!editId){ toast("Add a dealer first"); dealerForm(); return; }
+  const old=editId?S.txns.get(editId):null;
+  show(()=>{ const did=old?old.dealerId:dealerId, bal=did?status(did).balance:0;
+  return [head(editId?`Edit write-off ${esc(old.no||"")}`:"Write off bad debt","Remove an amount from the dealer's balance when it will not be collected.")+`<form id="f" class="form-grid">
+    <label class="f span">Dealer<select id="w-dealer" required><option value="">Choose dealer…</option>${dealerOptions(did)}</select></label>
+    <div class="span notice warn"><p><b>Current balance: <span id="w-bal">${P(bal)}</span></b><span id="w-hint">${bal>0?"":" · This dealer has no balance to write off."}</span></p></div>
+    <label class="f">Amount to write off (₱)<input id="w-amt" type="number" min="0.01" step="0.01" required value="${old?old.amount:""}"></label>
+    <label class="f">Date<input id="w-date" type="date" required value="${old?old.date:today()}"></label>
+    <label class="f span">Reason<input id="w-reason" required maxlength="160" value="${esc(old?old.reason:"")}" placeholder="e.g. unreachable, closed business"></label>
+    <label class="f span">Note<input id="w-note" value="${esc(old?old.note:"")}"></label>
+    <div class="actions span"><button class="btn danger" type="submit">${old?"Save changes":"Write off"}</button><button class="btn" type="button" data-back>Cancel</button></div></form>`,sh=>{
+    const refresh=()=>{ const b=status($("#w-dealer",sh).value).balance; $("#w-bal",sh).textContent=P(b); $("#w-hint",sh).textContent=b>0?"":" · This dealer has no balance to write off."; };
+    $("#w-dealer",sh).addEventListener("change",refresh); refresh();
+    $("#f",sh).addEventListener("submit",e=>{ e.preventDefault(); const btn=e.submitter||$("button[type=submit]",sh);
+      const wid=$("#w-dealer").value, amount=r2($("#w-amt").value), reason=$("#w-reason").value.trim();
+      if(!wid||amount<=0||!reason){ toast("Choose the dealer, amount and reason"); return; }
+      const data={...(old||{}),type:"writeoff",dealerId:wid,amount,date:$("#w-date").value,reason,note:$("#w-note").value.trim()};
+      if(!old){ data.no=nextNo("writeoff"); data.createdAt=Date.now(); data.createdBy=S.me; } else data.updated=stamp();
+      guarded(btn,async()=>{ await db.collection("txns").doc(editId||undefined).set(data); toast(old?"Write-off updated":`${P(amount)} written off`); back(); });
+    });
+  }]; });
 }
 function txSheet(id){
   show(()=>{ const t=S.txns.get(id); if(!t) return [head("Transaction not found")+`<p>This record was removed.</p>`];
@@ -1489,7 +2012,7 @@ function txSheet(id){
       `<div class="actions"><button class="btn primary" data-act="receipt" data-id="${esc(id)}" type="button">Receipt</button><button class="btn" id="t-edit" type="button">Edit</button><button class="btn" data-dealer="${t.dealerId}" type="button">Open dealer</button></div>
       <section class="panel" style="margin-top:16px"><h2>Void this record</h2><p class="small" style="margin-top:0">Voiding keeps the record for your history but removes it from balances and reports${t.type!=="payment"?", and reverses its stock change":""}.</p>
       <div class="actions"><input id="t-reason" placeholder="Reason, e.g. wrong dealer" style="flex:1;min-width:180px"><button class="btn danger" id="t-void" type="button">Void</button></div></section>`):(S.canWrite?`<div class="notice info"><p>Only the owner or an editor can change this record. Staff can edit or void only what they recorded today.</p><button class="btn sm" data-dealer="${t.dealerId}" type="button">Open dealer</button></div>`:"")}`,sh=>{
-    const ed=$("#t-edit",sh); if(ed) ed.addEventListener("click",()=>t.opening?openingForm(null,id):t.type==="payment"?paymentForm(null,id):itemsForm(t.type,null,id));
+    const ed=$("#t-edit",sh); if(ed) ed.addEventListener("click",()=>t.opening?openingForm(null,id):t.type==="payment"?paymentForm(null,id):t.type==="adjustment"?adjustmentForm(null,id):t.type==="writeoff"?writeoffForm(null,id):itemsForm(t.type,null,id));
     const vd=$("#t-void",sh); if(vd) vd.addEventListener("click",()=>{ if(armed(vd,"Tap again to void")) guarded(vd,async()=>{ const nt={...t,voided:true,voidedAt:Date.now(),voidedBy:S.me,voidReason:$("#t-reason").value.trim()}; await db.doc("txns/"+id).set(nt); await applyStock(diffEffect(t,nt)); toast(`${t.no||"Record"} voided`); }); });
     const uv=$("#t-unvoid",sh); if(uv) uv.addEventListener("click",()=>guarded(uv,async()=>{ const nt={...t,voided:false,updated:stamp()}; delete nt.voidedAt; delete nt.voidedBy; delete nt.voidReason; await db.doc("txns/"+id).set(nt); await applyStock(diffEffect(t,nt)); toast("Restored"); }));
     const dl=$("#t-del",sh); if(dl) dl.addEventListener("click",()=>{ if(armed(dl,"Tap again to delete")) guarded(dl,async()=>{ await db.doc("txns/"+id).delete(); toast("Deleted"); back(); }); });
@@ -1501,6 +2024,15 @@ async function clearSamples(btn){
   await guarded(btn,async()=>{ btn.textContent="Removing…";
     for(const c of ["txns","moves","dealers","products"]) for(const [id,x] of [...S[c]]) if(x.sample){ await db.doc(c+"/"+id).delete(); if(c==="products"&&x.imageId&&assets) assets.delete(x.imageId).catch(()=>{}); }
     toast("Examples removed"); });
+}
+function restoreFullFlow(file){
+  const area=$("#restoreArea"); const rd=new FileReader();
+  rd.onload=()=>{ let data; try{ data=JSON.parse(rd.result); if(data.app!=="dealer-credit-ledger"||!data.collections) throw 0; }catch(e){ area.innerHTML=`<div class="notice bad" style="margin-top:12px"><p>That file isn't a full ledger backup. Choose one made with “Download full backup”.</p></div>`; return; }
+    const counts=Object.entries(data.collections||{}).map(([c,rows])=>`${rows.length} ${c}`).join(", ");
+    area.innerHTML=`<div class="notice warn" style="margin-top:12px"><p>Full backup from <b>${esc(fmtStamp(Date.parse(data.exportedAt)))}</b>: ${esc(counts)}${data.users?`, ${data.users.length} accounts`:""}${data.assets?`, ${data.assets.length} photos`:""}. Restoring overwrites matching records, accounts and photos, and keeps anything added since.</p><button class="btn danger sm" id="doFullRestore" type="button">Restore full backup now</button></div>`;
+    const b=$("#doFullRestore"); b.addEventListener("click",()=>{ if(!armed(b,"Tap again to restore")) return; guarded(b,async()=>{ const r=await window.APP.backupRestore(data,true); area.innerHTML=`<div class="notice info" style="margin-top:12px"><p>Restored ${r.docs||0} records, ${r.users||0} accounts and ${r.assets||0} photos.</p></div>`; toast("Full backup restored"); }); });
+  };
+  rd.readAsText(file);
 }
 function backupJson(){
   const out={app:"dealer-credit-ledger",version:2,exportedAt:new Date().toISOString(),settings:S.settings};
@@ -1590,29 +2122,32 @@ document.addEventListener("click",e=>{
   if(e.target.closest("a[target=_blank]")) return;
   const ofb=e.target.closest("[data-of]"); if(ofb){ S.ordFilter=ofb.dataset.of; render(); return; }
   const orw=e.target.closest("[data-order]"); if(orw){ orderSheet(orw.dataset.order); return; }
+  const sfb=e.target.closest("[data-sf]"); if(sfb){ S.stageF=sfb.dataset.sf; render(); return; }
   const cf=e.target.closest("[data-cf]"); if(cf){ S.collectAll=cf.dataset.cf==="all"; render(); return; }
   const pre=e.target.closest("[data-preset]"); if(pre){ S.range.preset=pre.dataset.preset; if(S.range.preset==="custom"&&!S.range.from){ const [f,t]=[addDays(today(),-30),today()]; S.range.from=f; S.range.to=t; } render(); return; }
   const a=e.target.closest("[data-act]");
   if(a){ const act=a.dataset.act, id=a.dataset.id;
     ({ "new-sale":()=>itemsForm("sale"), "new-pay":()=>paymentForm(), "new-return":()=>itemsForm("return"),
        "sale-for":()=>itemsForm("sale",id), "pay-for":()=>paymentForm(id), "ret-for":()=>itemsForm("return",id),
-       "new-dealer":()=>dealerForm(), "edit-dealer":()=>dealerForm(id), "new-product":()=>productForm(),
+       "adjust-for":()=>adjustmentForm(id), "writeoff-for":()=>writeoffForm(id),
+       "new-dealer":()=>dealerForm(), "new-prospect":()=>dealerForm(null,"lead"), "log-contact":()=>contactForm(id), "edit-contact":()=>contactForm(null,id), "fu-done":()=>markFollowUpDone(id,a), "edit-dealer":()=>dealerForm(id), "new-product":()=>productForm(),
        "stock-in":()=>stockForm(), "stock-for":()=>stockForm(id), "clear-samples":()=>{ if(armed(a,"Tap again to remove")) clearSamples(a); },
        "backup":async()=>{ if(await save(`ledger-backup-${today()}.json`,backupJson())){ lsSet("lastBackup",Date.now()); render(); } },
-       "receipt":()=>receiptSheet(id),
+       "receipt":()=>receiptSheet(id), "aging":()=>agingSheet(), "aging-for":()=>agingSheet(id), "statement":()=>statementSheet(id),
        "go-orders":()=>goView("orders"),
        "catalog":()=>catalogSheet(),
-       "pay-amt":()=>paymentForm(id,null,{amount:Number(a.dataset.amt).toFixed(2)}),
-       "new-user":()=>userForm(), "portal-for":()=>{ const ex=(S.team||[]).find(u=>u.role==="dealer"&&u.dealerId===id); userForm(ex?ex.id:null,ex?null:id); }, "edit-user":()=>userForm(id), "change-pw":()=>passwordForm(), "logout":()=>window.APP.logout(),
+       "pay-amt":()=>paymentForm(id,null,{amount:Number(a.dataset.amt).toFixed(2),deliveryId:a.dataset.did||null}),
+       "new-user":()=>userForm(), "portal-for":()=>{ const ex=(S.team||[]).find(u=>u.role==="dealer"&&u.dealerId===id); userForm(ex?ex.id:null,ex?null:id); }, "edit-user":()=>userForm(id), "change-pw":()=>passwordForm(), "logout":()=>guarded(a,async()=>{ try{ await window.APP.logout(!!a.dataset.armed); }catch(e){ if(e&&e.code==="unsent"){ a.disabled=false; armed(a,"Tap again to discard and sign out"); toast(e.userMsg,"error"); return; } throw e; } }), "held-review":()=>heldSheet(), "approvals":()=>approvalsSheet(),
        "load-audit":()=>guarded(a,async()=>{ S.audit=await window.APP.audit(150); render(); }),
        "go-dealers":()=>goView("dealers"), "go-collect":()=>goView("collect"), "count":()=>countSheet(),
        "opening-for":()=>openingForm(id), "new-opening":()=>openingForm(),
        "remind-copy":()=>copyText(reminderText(id),"Reminder message"),
-       "remind-mark":()=>guarded(a,async()=>{ const d=S.dealers.get(id); const on=d.lastReminded!==today(); await db.doc("dealers/"+id).update(on?{lastReminded:today(),lastRemindedBy:S.me}:{lastReminded:d.prevReminded||null}); if(on) await db.doc("dealers/"+id).update({prevReminded:d.lastReminded||null}); toast(on?`${d.name} marked as reminded`:"Reminder unmarked"); }),
-       "export-tx":()=>save(`transactions-${today()}.csv`,csv([["Date","No.","Type","Status","Dealer","Items","Subtotal","Dealer discount %","Dealer discount","Extra discount","Amount","Due date","Method","Reference","Note"],...[...S.txns.values()].sort((x,y)=>(x.date||"").localeCompare(y.date||"")).map(t=>{ const d=S.dealers.get(t.dealerId); return [t.date,t.no||"",TYPE_LABEL[t.type],t.voided?"Voided":"OK",d?d.name:"",(t.items||[]).map(i=>`${i.name} x${i.qty} @ ${i.price}`).join("; "),t.subtotal??"",t.discountPct??"",t.pctDiscount||"",t.discount||"",t.type==="sale"?t.amount:-t.amount,t.dueDate||"",t.method||"",t.ref||"",t.note||""]; })])),
-       "export-dealers":()=>save(`dealers-${today()}.csv`,csv([["Dealer","Mobile","Area","Credit limit","Terms (days)","Balance","Overdue","Days late","Last payment","Rating","Paid on time %","Avg days to pay","Worst delay (days)","Total credit taken","Total paid","Status"],...[...S.dealers.entries()].map(([id,d])=>{ const st=status(id), h=history(id); return [d.name,d.phone,d.area,d.creditLimit??"",d.terms??"",st.balance,st.overdue,st.maxLate,st.lastPay||"",h.grade.g,h.n?Math.round(h.onTime/h.n*100):"",h.avgDays??"",h.worst,h.taken,h.paid,d.active===false?"Archived":"Active"]; })])),
-       "export-products":()=>save(`products-${today()}.csv`,csv([["Product","Category","Code","Dealer price","SRP","Stock","Reorder level","Status"],...[...S.products.values()].map(p=>[p.name,p.category||"",p.code||"",p.dealerPrice,p.srp??"",p.stock,p.reorderLevel??"",p.active===false?"Archived":"Active"])])),
-       "export-report":()=>{ const R=reportData(); save(`report-${R.from}-to-${R.to}.csv`,csv([["Report",`${R.from} to ${R.to}`],[],["Credit sales",R.tot.sale],["Discounts",R.tot.discount],["Returns",R.tot.return],["Collections",R.tot.payment],[],["Product","Qty sold","Qty returned","Sales"],...Object.values(R.byP).map(p=>[p.name,p.qty,p.ret,r2(p.amt)]),[],["Dealer","Net sales","Paid","Balance now"],...Object.entries(R.byD).map(([id,d])=>[S.dealers.get(id)?.name||"",r2(d.sale-d.return),r2(d.payment),status(id).balance]),[],["Method","Collected"],...Object.entries(R.byM)])); }
+       "remind-mark":()=>guarded(a,async()=>{ const d=S.dealers.get(id); const on=d.lastReminded!==today(); await db.doc("dealers/"+id).update(on?{lastReminded:today(),lastRemindedBy:S.me}:{lastReminded:d.prevReminded||null}); if(on){ await db.doc("dealers/"+id).update({prevReminded:d.lastReminded||null}); await db.collection("interactions").doc().set({dealerId:id,kind:"message",date:today(),outcome:"Payment reminder sent",note:"",followUp:null,followUpDone:false,createdAt:Date.now(),createdBy:S.me}); } toast(on?`${d.name} marked as reminded`:"Reminder unmarked"); }),
+        "export-tx":()=>save(`transactions-${today()}.csv`,csv([["Date","No.","Type","Status","Dealer","Items","Subtotal","Dealer discount %","Dealer discount","Extra discount","Amount","Direction","Due date","Method","Reference","Cost","Gross profit","Note"],...[...S.txns.values()].sort((x,y)=>(x.date||"").localeCompare(y.date||"")).map(t=>{ const d=S.dealers.get(t.dealerId), cost=r2((t.items||[]).reduce((a,i)=>a+i.qty*(i.cost!=null?Number(i.cost):Number((S.products.get(i.productId)||{}).cost)||0),0)); const effect=t.voided?0:txnEffect(t); return [t.date,t.no||"",TYPE_LABEL[t.type],t.voided?"Voided":"OK",d?d.name:"",(t.items||[]).map(i=>`${i.name} x${i.qty} @ ${i.price}`).join("; "),t.subtotal??"",t.discountPct??"",t.pctDiscount||"",t.discount||"",t.amount,t.direction||"",t.dueDate||"",t.method||"",t.ref||"",cost||"",t.type==="sale"?r2(t.amount-cost):t.type==="return"?r2(cost-t.amount):"",`${t.note||""}${t.reason?` · ${t.reason}`:""}${t.voided?` · balance effect ${P(effect)}`:""}`]; })])),
+        "export-dealers":()=>save(`dealers-${today()}.csv`,csv([["Dealer ID","Stage","Email","Address","Source","Referred by","Tags","Last contact","Next follow-up","Dealer","Mobile","Area","Credit limit","Terms (days)","Balance","Overdue","Days late","Last payment","Rating","Paid on time %","Avg days to pay","Worst delay (days)","Total credit taken","Total paid","Write-offs","Status"],...[...S.dealers.entries()].map(([id,d])=>{ const st=status(id), h=history(id), c=crmInfo(id); return [id,STAGE_L[stageOf(d)],d.email||"",d.address||"",d.source||"",d.referredBy||"",(d.tags||[]).join("; "),c.last||"",c.next?c.next[1].followUp:"",d.name,d.phone,d.area,d.creditLimit??"",d.terms??"",st.balance,st.overdue,st.maxLate,h.lastPay||"",h.grade.g,h.n?Math.round(h.onTime/h.n*100):"",h.avgDays??"",h.worst,h.taken,h.paid,h.writeoff||0,d.active===false?"Archived":"Active"]; })])),
+        "export-products":()=>save(`products-${today()}.csv`,csv([["Product","Category","Code","Dealer price","SRP","Cost","Profit per piece","Margin %","Stock","Reorder level","Status"],...[...S.products.values()].map(p=>{ const profit=p.cost!=null?r2(p.dealerPrice-p.cost):""; return [p.name,p.category||"",p.code||"",p.dealerPrice,p.srp??"",p.cost??"",profit,profit!==""&&p.dealerPrice?Math.round(profit/p.dealerPrice*100):"",p.stock,p.reorderLevel??"",p.active===false?"Archived":"Active"]; })])),
+        "export-report":()=>{ const R=reportData(); save(`report-${R.from}-to-${R.to}.csv`,csv([["Report",`${R.from} to ${R.to}`],[],["Credit sales",R.tot.sale],["Discounts",R.tot.discount],["Returns",R.tot.return],["Debit adjustments",R.tot.adjustmentDebit],["Credit adjustments",R.tot.adjustmentCredit],["Write-offs",R.tot.writeoff],["Collections",R.tot.payment],["Cost of goods sold",R.tot.cost],["Gross profit",R.tot.profit],[],["Product","Qty sold","Qty returned","Sales","Cost","Profit"],...Object.values(R.byP).map(p=>[p.name,p.qty,p.ret,r2(p.amt),r2(p.cost),r2(p.profit)]),[],["Dealer","Net sales","Paid","Balance now","Write-offs"],...Object.entries(R.byD).map(([id,d])=>[S.dealers.get(id)?.name||"",r2(d.sale-d.return),r2(d.payment),status(id).balance,r2(d.writeoff)]),[],["Method","Collected"],...Object.entries(R.byM)])); },
+        "backup-full":async()=>{ if(!window.APP) return toast("Full backups need the server connection"); await guarded(a,async()=>{ const data=await window.APP.backupFull(); if(await save(`ledger-full-${today()}.json`,JSON.stringify(data,null,1))){ lsSet("lastBackup",Date.now()); toast("Full backup downloaded"); render(); } }); },
     }[act]||(()=>{}))();
     return; }
   const tx=e.target.closest("[data-tx]"); if(tx&&(!e.target.closest("button")||e.target.closest("button")===tx)){ txSheet(tx.dataset.tx); return; }
@@ -1632,14 +2167,17 @@ let qTimer; document.addEventListener("input",e=>{ if(e.target.id==="q"){ S.q=e.
 document.addEventListener("change",e=>{
   const id=e.target.id;
   if(id==="txFilter"){ S.txFilter=e.target.value; render(); }
+  else if(id==="tagFilter"){ S.tagF=e.target.value; render(); }
+  else if(id==="crm-stage"){ const did=e.target.dataset.id, v=e.target.value; db.doc("dealers/"+did).update({stage:v,updated:stamp()}).then(()=>toast(`Moved to ${STAGE_L[v]}`),err=>toast(errMsg(err))); }
   else if(id==="catFilter"){ S.catFilter=e.target.value; render(); }
   else if(id==="showArch"){ S.showArchived=e.target.checked; render(); }
   else if(id==="rFrom"||id==="rTo"){ S.range[id==="rFrom"?"from":"to"]=e.target.value; render(); }
   else if(id==="restoreFile"&&e.target.files[0]) restoreFlow(e.target.files[0]);
+  else if(id==="restoreFullFile"&&e.target.files[0]) restoreFullFlow(e.target.files[0]);
 });
 document.addEventListener("submit",e=>{
   if(e.target.id!=="storeForm") return; e.preventDefault(); const btn=e.submitter||$("button[type=submit]",e.target);
-  const data={storeName:$("#st-name").value.trim(),phone:$("#st-phone").value.trim(),address:$("#st-addr").value.trim(),paymentInfo:$("#st-pay").value.trim(),defaultTerms:Math.max(0,Math.round(Number($("#st-terms").value)||0)),footer:$("#st-foot").value.trim(),defaultLimit:$("#st-limit").value===""?null:r2($("#st-limit").value),holdDays:Math.max(1,Math.round(Number($("#st-hold").value)||60)),blockOverLimit:$("#st-block").checked,reminderTemplate:$("#st-msg").value.trim(),discountPct:Math.min(100,Math.max(0,Number($("#st-pct").value)||0)),updated:stamp()};
+  const data={storeName:$("#st-name").value.trim(),phone:$("#st-phone").value.trim(),address:$("#st-addr").value.trim(),paymentInfo:$("#st-pay").value.trim(),defaultTerms:Math.max(0,Math.round(Number($("#st-terms").value)||0)),footer:$("#st-foot").value.trim(),defaultLimit:$("#st-limit").value===""?null:r2($("#st-limit").value),holdDays:Math.max(1,Math.round(Number($("#st-hold").value)||60)),approvalHours:Math.min(336,Math.max(1,Math.round(Number($("#st-apph").value)||24))),blockOverLimit:$("#st-block").checked,allowNegativeStock:$("#st-neg").checked,reminderTemplate:$("#st-msg").value.trim(),discountPct:Math.min(100,Math.max(0,Number($("#st-pct").value)||0)),updated:stamp()};
   guarded(btn,async()=>{ await db.doc("settings/store").set(data); toast("Store details saved"); btn.disabled=false; });
 });
 const VIEWS=["overview","orders","collect","dealers","products","activity","reports","store"];
@@ -1658,8 +2196,10 @@ window.addEventListener("hashchange",()=>{ fromHash(); render(); }); fromHash();
   const onErr=e=>{ clearTimeout(timer); console.error(e); sync.textContent=e&&e.code==="invalid_argument"?"You don't have access to this ledger's data.":"Lost connection. Reload the page to retry."; if(!Object.values(S.loaded).every(Boolean)) $("#main").innerHTML=`<section class="panel"><div class="empty"><h3>Couldn't load the ledger</h3><p>${esc(sync.textContent)}</p></div></section>`; };
   const norm={dealers:x=>x,products:x=>({...x,stock:Number(x.stock)||0,dealerPrice:Number(x.dealerPrice)||0}),txns:x=>({...x,amount:Number(x.amount)||0}),moves:x=>({...x,qty:Number(x.qty)||0})};
   let raf=0; const schedule=()=>{ if(raf) return; raf=requestAnimationFrame(()=>{ raf=0; render(); paintSheet(true); }); };
-  const done=meta=>{ if(!meta.fromCache&&Object.values(S.loaded).every(Boolean)){ clearTimeout(timer); sync.textContent=S.canWrite?"Saved · updates live":"View only · updates live"; } };
+  const done=meta=>{ if(!meta.fromCache&&Object.values(S.loaded).every(Boolean)){ clearTimeout(timer); sync.textContent=offlineText()||(S.canWrite?"Saved · updates live":"View only · updates live"); } };
+  window.addEventListener("dcl-offline",()=>{ if(Object.values(S.loaded).every(Boolean)){ clearTimeout(timer); sync.textContent=offlineText()||(S.canWrite?"Saved · updates live":"View only · updates live"); } S._ver++; schedule(); });
   COLS.forEach(c=>db.collection(c).onSnapshot(snap=>{ const m=new Map(); snap.docs.forEach(d=>m.set(d.id,(norm[c]||(x=>x))(d.data())));
+    if(c==="approvals"&&S.loaded.approvals&&S.canAdmin) m.forEach((r,k)=>{ if(!S.approvals.has(k)&&r.status==="pending"){ const d=S.dealers.get(r.dealerId); toast(`Approval needed: ${d?d.name:"a dealer"} · ${P(r.amount)}`); } });
     if(c==="orders"&&S.loaded.orders) m.forEach((o,k)=>{ if(!S.orders.has(k)&&o.status==="new"){ const d=S.dealers.get(o.dealerId); toast(`New online order ${o.no||""} from ${d?d.name:"a dealer"}`); } }); S[c]=m; S.loaded[c]=true; S._ver++; done(snap.metadata); schedule(); },onErr));
   db.doc("settings/store").onSnapshot(snap=>{ S.settings=snap.exists?{...snap.data()}:{}; S.loaded.settings=true; S._ver++; done(snap.metadata); schedule(); },onErr);
 })();
