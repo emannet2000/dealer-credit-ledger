@@ -13,7 +13,7 @@ process.env.TZ = process.env.TZ || "Asia/Manila";
 
 const { createApp } = require("./lib/app");
 const { app, close, backupNow, dataDir } = createApp({ dataDir: process.env.DATA_DIR || path.join(__dirname, "data") });
-const port = Number(process.env.PORT) || 4000;
+const port = Number(process.env.PORT) || 3000;
 
 const server = app.listen(port, () => {
   console.log(`Dealer Credit Ledger running at http://localhost:${port}`);
