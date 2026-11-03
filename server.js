@@ -20,7 +20,7 @@ if (process.env.NODE_ENV === "production" && String(process.env.COOKIE_SECURE) !
 
 const { createApp } = require("./lib/app");
 const { app, close, backupNow, dataDir } = createApp({ dataDir: process.env.DATA_DIR || path.join(__dirname, "data") });
-const port = Number(process.env.PORT) || 3000;
+const port = Number(process.env.PORT) || 8000;
 
 const server = app.listen(port, () => {
   console.log(`Dealer Credit Ledger running at http://localhost:${port}`);
