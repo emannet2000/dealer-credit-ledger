@@ -82,10 +82,12 @@ test("credit sales get sequential DR numbers and stock moves atomically", async 
   await owner("PUT", "/api/c/dealers/d1", { data: { name: "Maria", creditLimit: 5000, terms: 30 } });
   await owner("PUT", "/api/c/products/p1", { data: { name: "Soap", dealerPrice: 75, srp: 100, stock: 50 } });
   const a = await staff("PUT", "/api/c/txns/s1", { data: { type: "sale", dealerId: "d1", date: day(0), dueDate: day(30), items: [{ productId: "p1", name: "Soap", qty: 4, price: 100 }], subtotal: 400, discountPct: 25, pctDiscount: 100, amount: 300 } });
-  const b = await staff("PUT", "/api/c/txns/s2", { data: { type: "sale", dealerId: "d1", date: day(0), dueDate: day(30), items: [], amount: 100, no: "DR-00001" } });
+  const b = await staff("PUT", "/api/c/txns/s2", { data: { type: "sale", dealerId: "d1", date: day(0), dueDate: day(30), items: [{ productId: "p1", name: "Soap", qty: 1, price: 100, pct: 25 }], amount: 75, no: "DR-00001" } });
   assert.equal(a.data.data.no, "DR-00001");
   assert.equal(b.data.data.no, "DR-00002", "duplicate numbers are replaced");
-  const s = await staff("POST", "/api/stock", { deltas: { p1: -4 } });
+  // The sale itself moved the stock (PR-03): 50 - 4 - 1.
+  assert.equal((await owner("GET", "/api/c/products")).data.find((p) => p.id === "p1").data.stock, 45);
+  const s = await staff("POST", "/api/stock", { deltas: { p1: 1 } });
   assert.equal(s.data.stock.p1, 46);
   // a product edit can't overwrite stock
   await owner("PUT", "/api/c/products/p1", { data: { name: "Soap 135g", dealerPrice: 75, srp: 100, stock: 999 } });
@@ -117,10 +119,11 @@ test("staff can edit their own records today, but not other people's", async () 
 test("credit hold blocks staff releases to late dealers; the owner can still release", async () => {
   await owner("PUT", "/api/c/dealers/late", { data: { name: "Late Larry", creditLimit: 10000, terms: 15 } });
   await owner("PUT", "/api/c/txns/old", { data: { type: "sale", opening: true, dealerId: "late", date: day(-100), dueDate: day(-85), items: [], amount: 800 } });
-  const blocked = await staff("PUT", "/api/c/txns/new1", { data: { type: "sale", dealerId: "late", date: day(0), dueDate: day(15), items: [], amount: 100 } });
+  const line = (qty) => [{ productId: "p1", name: "Soap", qty, price: 100, pct: 25 }];
+  const blocked = await staff("PUT", "/api/c/txns/new1", { data: { type: "sale", dealerId: "late", date: day(0), dueDate: day(15), items: line(1), amount: 75 } });
   assert.equal(blocked.status, 409);
   assert.equal(blocked.data.code, "credit_hold");
-  const over = await staff("PUT", "/api/c/txns/new2", { data: { type: "sale", dealerId: "d1", date: day(0), dueDate: day(30), items: [], amount: 6000 } });
+  const over = await staff("PUT", "/api/c/txns/new2", { data: { type: "sale", dealerId: "d1", date: day(0), dueDate: day(30), items: line(80), amount: 6000 } });
   assert.equal(over.status, 409, "over the credit limit");
   assert.equal((await owner("PUT", "/api/c/txns/new3", { data: { type: "sale", dealerId: "late", date: day(0), dueDate: day(15), items: [], amount: 100, override: { by: "owner" } } })).status, 200);
 });
@@ -508,7 +511,7 @@ test("blocked staff sales go to the owner as approval requests", async () => {
   await owner("PUT", "/api/c/products/ap-p", { data: { name: "Approval Soap", dealerPrice: 50, srp: 70, stock: 20 } });
   const stock = async () => (await owner("GET", "/api/c/products")).data.find((p) => p.id === "ap-p").data.stock;
   const before = await stock();
-  const sale = { type: "sale", dealerId: "ap1", date: day(0), dueDate: day(15), amount: 100, items: [{ productId: "ap-p", name: "Approval Soap", qty: 2, price: 50 }], no: "DR-FAKE", override: { by: "me" } };
+  const sale = { type: "sale", dealerId: "ap1", date: day(0), dueDate: day(15), amount: 105, items: [{ productId: "ap-p", name: "Approval Soap", qty: 2, price: 70, pct: 25 }], no: "DR-FAKE", override: { by: "me" } };
 
   // Staff are blocked, then send the sale for approval with a reason.
   const blocked = await staff("PUT", "/api/c/txns/ap-s1", { data: sale });
@@ -533,7 +536,7 @@ test("blocked staff sales go to the owner as approval requests", async () => {
   assert.equal(ok.status, 200);
   assert.equal(ok.data.data.status, "approved");
   const t = (await owner("GET", "/api/c/txns")).data.find((x) => x.id === ok.data.data.txnId).data;
-  assert.equal(t.amount, 100);
+  assert.equal(t.amount, 105);
   assert.notEqual(t.no, "DR-FAKE");
   assert.equal(t.override.requestId, req1.data.id);
   assert.equal(t.createdBy, (await staff("GET", "/api/me")).data.id);
@@ -562,4 +565,59 @@ test("blocked staff sales go to the owner as approval requests", async () => {
   // A sale that isn't blocked is recorded normally instead.
   await owner("PUT", "/api/c/dealers/ap2", { data: { name: "Good Payer" } });
   assert.equal((await staff("POST", "/api/approvals", { sale: { ...sale, dealerId: "ap2" }, reason: "x y z" })).status, 400);
+});
+
+test("the server prices credit sales and saves each sale with its stock change (PR-03, PR-04)", async () => {
+  await owner("PUT", "/api/c/dealers/pr1", { data: { name: "Pricing Dealer", terms: 30 } });
+  await owner("PUT", "/api/c/products/pr-p", { data: { name: "Lotion", dealerPrice: 150, srp: 200, cost: 90, stock: 10 } });
+  const stock = async () => (await owner("GET", "/api/c/products")).data.find((p) => p.id === "pr-p").data.stock;
+  const line = (extra = {}) => ({ productId: "pr-p", name: "Lotion", qty: 2, price: 200, pct: 25, ...extra });
+  const sale = (id, items, extra = {}, who = staff) => who("PUT", "/api/c/txns/" + id, { data: { type: "sale", dealerId: "pr1", date: day(0), dueDate: day(30), items, amount: 1, subtotal: 1, pctDiscount: 0, ...extra } });
+
+  // Totals and cost come from the server, whatever the browser sends.
+  const ok = await sale("pr-s1", [line({ cost: 0 })]);
+  assert.equal(ok.status, 200);
+  assert.equal(ok.data.data.amount, 300);
+  assert.equal(ok.data.data.subtotal, 400);
+  assert.equal(ok.data.data.items[0].cost, 90);
+  assert.equal(ok.data.data.manualPrice, undefined);
+  assert.equal(await stock(), 8, "stock moved with the sale");
+
+  // A changed price or extra discount needs a reason from staff; owners can just do it.
+  const cheap = await sale("pr-s2", [line({ price: 1 })]);
+  assert.equal(cheap.status, 400);
+  assert.equal(cheap.data.code, "price_reason");
+  assert.equal((await sale("pr-s2", [line({ pct: 90 })])).data.code, "price_reason");
+  assert.equal((await sale("pr-s2", [line()], { discount: 50 })).data.code, "price_reason");
+  assert.equal(await stock(), 8, "refused sales take no stock");
+  const why = await sale("pr-s2", [line({ price: 180 })], { priceReason: "Damaged box" });
+  assert.equal(why.status, 200);
+  assert.equal(why.data.data.manualPrice, true);
+  assert.equal(why.data.data.items[0].manual, true);
+  assert.equal(why.data.data.priceReason, "Damaged box");
+  assert.equal(why.data.data.amount, 270);
+  assert.equal((await sale("pr-s3", [line({ price: 150, qty: 1 })], {}, owner)).data.data.manualPrice, true);
+  assert.equal(await stock(), 5);
+
+  // Not enough stock: nothing is saved at all.
+  const big = await sale("pr-s4", [line({ qty: 50 })]);
+  assert.equal(big.status, 409);
+  assert.equal(big.data.code, "insufficient_stock");
+  assert.ok(!(await owner("GET", "/api/c/txns")).data.some((t) => t.id === "pr-s4"));
+  assert.equal(await stock(), 5);
+
+  // Voiding gives the stock back, restoring takes it again, deleting gives it back.
+  await staff("PATCH", "/api/c/txns/pr-s1", { data: { voided: true, voidReason: "test" } });
+  assert.equal(await stock(), 7);
+  await staff("PATCH", "/api/c/txns/pr-s1", { data: { voided: false } });
+  assert.equal(await stock(), 5);
+  // A restocked return of that sale must use the sale's price, and adds stock.
+  const ret = (price) => staff("PUT", "/api/c/txns/pr-r1", { data: { type: "return", dealerId: "pr1", date: day(0), saleId: "pr-s1", restock: true, items: [{ productId: "pr-p", name: "Lotion", qty: 1, price, pct: 25 }], amount: 1 } });
+  assert.equal((await ret(500)).data.code, "price_reason");
+  const r = await ret(200);
+  assert.equal(r.status, 200);
+  assert.equal(r.data.data.amount, 150);
+  assert.equal(await stock(), 6);
+  await owner("DELETE", "/api/c/txns/pr-s3");
+  assert.equal(await stock(), 7);
 });

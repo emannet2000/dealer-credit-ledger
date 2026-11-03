@@ -649,7 +649,7 @@ function txDetails(t){
   const no=t.no?`<span class="small muted">${esc(t.no)}</span> `:"";
   const vd=(t.voided?` <span class="pill bad">Voided</span>`:"")+(t.offlineHeld?` <span class="pill bad">Needs review</span>`:t.offlinePending?` <span class="pill warn">Not synced</span>`:"");
   if(t.opening) return `${no}<span class="pill neutral">Opening balance</span>${vd}<div class="small muted">Due ${fmtDate(t.dueDate)}${t.note&&t.note!=="Opening balance"?" · "+esc(t.note):""}</div>`;
-  if(t.type==="sale") return `${no}<span class="pill neutral">Credit sale</span>${vd} <span class="small">${it}</span><div class="small muted">Due ${fmtDate(t.dueDate)}${t.pctDiscount?(t.discountPct!=null?` · less ${t.discountPct}%`:" · less dealer discount"):""}${t.discount?` · less ${P(t.discount)}`:""}${t.note?" · "+esc(t.note):""}</div>`;
+  if(t.type==="sale") return `${no}<span class="pill neutral">Credit sale</span>${vd}${t.manualPrice?` <span class="pill warn" title="${esc(t.priceReason||"")}">Manual price</span>`:""} <span class="small">${it}</span><div class="small muted">Due ${fmtDate(t.dueDate)}${t.pctDiscount?(t.discountPct!=null?` · less ${t.discountPct}%`:" · less dealer discount"):""}${t.discount?` · less ${P(t.discount)}`:""}${t.note?" · "+esc(t.note):""}</div>`;
   if(t.type==="return") return `${no}<span class="pill warn">Return</span>${vd} <span class="small">${it}</span><div class="small muted">${t.restock?"Back to stock":"Not restocked"}${t.saleNo?` · from ${esc(t.saleNo)}`:""}${t.note?" · "+esc(t.note):""}</div>`;
   if(t.type==="adjustment") return `${no}<span class="pill ${t.direction==="debit"?"warn":"good"}">${t.direction==="debit"?"Debit adjustment":"Credit adjustment"}</span>${vd} <div class="small muted">${t.reason?esc(t.reason):""}${t.note?" · "+esc(t.note):""}</div>`;
   if(t.type==="writeoff") return `${no}<span class="pill bad">Write-off</span>${vd} <div class="small muted">${esc(t.reason||"Bad debt")}${t.note?" · "+esc(t.note):""}</div>`;
@@ -985,6 +985,7 @@ function receiptSheet(id){
       <div class="rc-total"><span>${t.type==="sale"?"Total on credit":t.type==="payment"?"Amount received":t.type==="adjustment"?(t.direction==="debit"?"Amount added":"Amount credited"):t.type==="writeoff"?"Amount written off":"Total credited"}</span><b class="num">${P(t.amount)}</b></div>
       ${t.voided?"":`<p class="rc-bal">Balance after this: <b class="num">${P(balanceAfter(t))}</b></p>`}
       ${t.note&&t.note!=="Opening balance"?`<p class="small">Note: ${esc(t.note)}</p>`:""}
+      ${t.manualPrice&&S.canWrite?`<p class="small no-print">Manual price${t.priceReason?`: ${esc(t.priceReason)}`:" set by the owner or an editor"}.</p>`:""}
       ${t.type==="sale"&&s.paymentInfo?`<p class="small"><b>How to pay:</b> ${esc(s.paymentInfo)}</p>`:""}
       <div class="rc-sign">${t.type==="payment"?`<div><span></span>Received by (store)</div>`:`<div><span></span>Released by</div><div><span></span>Received by (dealer)</div>`}</div>
       <p class="rc-foot">This is not an official receipt. ${esc(s.footer??"Salamat po!")}</p>
@@ -1759,6 +1760,7 @@ function itemsForm(kind,dealerId,editId,opts){
       <label class="f">Dealer discount (%)<input id="s-pct" type="number" min="0" max="100" step="0.01" value="${startPct}"><span class="hint">Taken off the whole total. Store default is ${storePct()}%.</span></label>
       ${isSale?`<label class="f">Extra discount (₱)<input id="s-disc" type="number" min="0" step="0.01" value="${old&&old.discount?old.discount:""}" placeholder="0.00"><span class="hint">Optional, e.g. a promo.</span></label>`:""}
       <label class="f span">Note<input id="s-note" value="${esc(old?old.note:opts&&opts.note?opts.note:"")}" placeholder="${isSale?"Optional, e.g. delivered by Ben":"Reason, e.g. expired, wrong item"}"></label>
+      <label class="f span" id="s-whywrap" ${old&&old.priceReason?"":"hidden"}>Reason for the changed price or discount<input id="s-why" maxlength="300" value="${esc(old&&old.priceReason||"")}" placeholder="e.g. Damaged box, agreed with the owner"><span class="hint">Some prices or discounts differ from the price list. The owner sees this reason.</span></label>
       ${isSale&&!old?`<label class="chk span"><input type="checkbox" id="s-paid"> Dealer paid in full now <select id="s-method" hidden aria-label="Payment method" style="width:auto">${METHODS.map(m=>`<option>${m}</option>`).join("")}</select></label>`:""}
     </div>
     <div id="s-warn" style="margin-top:10px"></div>
@@ -1853,16 +1855,18 @@ function itemsForm(kind,dealerId,editId,opts){
       const needApproval=isSale&&!old&&S._hard&&!S.canAdmin;
       if(!isSale&&saleId){ for(const i of cart){ const max=maxByProduct[i.productId]; if(max==null||i.qty>max){ toast(max==null?`${i.name} is not on ${S.txns.get(saleId).no||"that delivery"}`:`Only ${max} of ${i.name} can be returned`); return; } } }
       const data={...(old||{}),type:kind,dealerId:did,date:$("#s-date").value,items:cart.map(i=>({productId:i.productId,name:i.name,qty:i.qty,price:i.price,pct:i.pct,...(i.cost!=null?{cost:r2(i.cost)}:{}),...(i.promo?{promo:true}:{})})),subtotal:T.sub,discountPct:uniPct(),pctDiscount:T.pd,amount:T.total,note:$("#s-note").value.trim()};
-      if(isSale){ data.dueDate=$("#s-due").value; data.discount=T.extra; delete data.saleId; delete data.saleNo; }
+      if(isSale){ data.dueDate=$("#s-due").value; data.discount=T.extra; delete data.saleId; delete data.saleNo; if(opts&&opts.orderId) data.orderId=opts.orderId; }
       else { data.restock=$("#s-restock").checked; data.saleId=saleId||null; data.saleNo=saleId?((S.txns.get(saleId)||{}).no||null):null; }
+      { const why=$("#s-why",sh).value.trim(); if(why) data.priceReason=why; else delete data.priceReason; }
       if(isSale&&!allowNegativeStock()){ const pids=Object.entries(diffEffect(old,data)).filter(([pid,dq])=>{ const p=S.products.get(pid); return p&&availableStock(pid,orderId)+dq<0; }); if(pids.length){ const [pid,dq]=pids[0], p=S.products.get(pid); toast(`Only ${Math.max(0,availableStock(pid,orderId))} of ${p.name} available. Add stock or turn on backorders in Store.`); return; } }
       if(!old){ data.no=nextNo(kind); data.createdAt=Date.now(); data.createdBy=S.me; if(approved) data.override={by:S.me,at:Date.now()}; } else data.updated=stamp();
       const paidM=paid&&paid.checked?$("#s-method").value:null;
       if(needApproval){ askApproval(data,opts,paidM); return; }
       guarded(btn,async()=>{
         const ref=db.collection("txns").doc(editId||undefined);
-        try{ await ref.set(data); }catch(err){ if(err&&err.code==="credit_hold"&&isSale&&!old&&!S.canAdmin){ btn.disabled=false; askApproval(data,opts,paidM,err.userMsg); return; } throw err; }
-        await applyStock(diffEffect(old,data));
+        try{ await ref.set(data); }catch(err){ if(err&&err.code==="credit_hold"&&isSale&&!old&&!S.canAdmin){ btn.disabled=false; askApproval(data,opts,paidM,err.userMsg); return; }
+          if(err&&err.code==="price_reason"){ btn.disabled=false; $("#s-whywrap",sh).hidden=false; $("#s-why",sh).focus(); toast(err.userMsg,"error"); return; } throw err; }
+        // The server changes stock in the same step as the sale (PR-03).
         if(paid&&paid.checked) await db.collection("txns").doc().set({type:"payment",dealerId:did,date:data.date,amount:data.amount,method:$("#s-method").value,ref:"",note:`Paid on release ${data.no}`,no:nextNo("payment"),createdAt:Date.now()+1,createdBy:S.me});
         if(opts&&opts.orderId&&S.orders.get(opts.orderId)) await db.doc("orders/"+opts.orderId).set({...S.orders.get(opts.orderId),status:"released",saleId:ref.id,saleNo:data.no});
         toast(editId?"Changes saved":isSale?`Credit sale ${data.no} recorded · ${P(data.amount)}`:`Return ${data.no} recorded`);
@@ -2013,8 +2017,8 @@ function txSheet(id){
       <section class="panel" style="margin-top:16px"><h2>Void this record</h2><p class="small" style="margin-top:0">Voiding keeps the record for your history but removes it from balances and reports${t.type!=="payment"?", and reverses its stock change":""}.</p>
       <div class="actions"><input id="t-reason" placeholder="Reason, e.g. wrong dealer" style="flex:1;min-width:180px"><button class="btn danger" id="t-void" type="button">Void</button></div></section>`):(S.canWrite?`<div class="notice info"><p>Only the owner or an editor can change this record. Staff can edit or void only what they recorded today.</p><button class="btn sm" data-dealer="${t.dealerId}" type="button">Open dealer</button></div>`:"")}`,sh=>{
     const ed=$("#t-edit",sh); if(ed) ed.addEventListener("click",()=>t.opening?openingForm(null,id):t.type==="payment"?paymentForm(null,id):t.type==="adjustment"?adjustmentForm(null,id):t.type==="writeoff"?writeoffForm(null,id):itemsForm(t.type,null,id));
-    const vd=$("#t-void",sh); if(vd) vd.addEventListener("click",()=>{ if(armed(vd,"Tap again to void")) guarded(vd,async()=>{ const nt={...t,voided:true,voidedAt:Date.now(),voidedBy:S.me,voidReason:$("#t-reason").value.trim()}; await db.doc("txns/"+id).set(nt); await applyStock(diffEffect(t,nt)); toast(`${t.no||"Record"} voided`); }); });
-    const uv=$("#t-unvoid",sh); if(uv) uv.addEventListener("click",()=>guarded(uv,async()=>{ const nt={...t,voided:false,updated:stamp()}; delete nt.voidedAt; delete nt.voidedBy; delete nt.voidReason; await db.doc("txns/"+id).set(nt); await applyStock(diffEffect(t,nt)); toast("Restored"); }));
+    const vd=$("#t-void",sh); if(vd) vd.addEventListener("click",()=>{ if(armed(vd,"Tap again to void")) guarded(vd,async()=>{ const nt={...t,voided:true,voidedAt:Date.now(),voidedBy:S.me,voidReason:$("#t-reason").value.trim()}; await db.doc("txns/"+id).set(nt); toast(`${t.no||"Record"} voided`); }); });
+    const uv=$("#t-unvoid",sh); if(uv) uv.addEventListener("click",()=>guarded(uv,async()=>{ const nt={...t,voided:false,updated:stamp()}; delete nt.voidedAt; delete nt.voidedBy; delete nt.voidReason; await db.doc("txns/"+id).set(nt); toast("Restored"); }));
     const dl=$("#t-del",sh); if(dl) dl.addEventListener("click",()=>{ if(armed(dl,"Tap again to delete")) guarded(dl,async()=>{ await db.doc("txns/"+id).delete(); toast("Deleted"); back(); }); });
   }]; },true);
 }
