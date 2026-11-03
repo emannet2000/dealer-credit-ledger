@@ -300,6 +300,16 @@ body.scrolled header{box-shadow:0 4px 18px rgba(0,0,0,.07)}
 .crm-log .crm-fu{margin-top:6px}
 .crm-log .crm-edit{position:absolute;top:8px;right:0}
 .seg [aria-pressed=true] .muted{color:inherit;opacity:.8}
+.avatar{border-radius:50%;object-fit:cover;flex:none;vertical-align:middle;background:var(--sunk)}
+.avatar.ph{display:inline-flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--accent) 14%,var(--surface));color:var(--accent);font-weight:700;letter-spacing:.02em}
+.photo-row{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.cropper{margin-top:10px;padding:12px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
+.crop-head{display:flex;flex-direction:column;gap:2px;margin-bottom:8px}
+.crop-stage{position:relative;display:inline-block;max-width:100%;touch-action:none;user-select:none;overflow:hidden;border-radius:8px}
+.crop-img{display:block;max-width:100%;max-height:60vh}
+.crop-box{position:absolute;box-shadow:0 0 0 9999px rgba(0,0,0,.55);border:2px solid #fff;border-radius:50%;cursor:move;outline-offset:3px}
+.crop-box::after{content:"";position:absolute;inset:0;border:1px dashed rgba(255,255,255,.7);pointer-events:none}
+.crop-h{position:absolute;z-index:1;right:2px;bottom:2px;width:24px;height:24px;border-radius:50%;background:#fff;border:2px solid var(--accent);cursor:nwse-resize}
 .link-row{display:flex;gap:8px;flex-wrap:wrap}
 .link-row input{flex:1 1 240px;min-width:0}
 .pick-amt{width:7.5em;flex:none}
@@ -633,7 +643,7 @@ function vDealers(){
       ${arch?`<label class="chk"><input type="checkbox" id="showArch" ${S.showArchived?"checked":""}> Show ${arch} archived</label>`:""}</div>
     ${rows.length?`<div class="tbl-wrap"><table><thead><tr><th>Dealer</th><th>Stage</th><th class="r">Balance</th><th>Credit used</th><th>Next due</th><th>Follow-up</th><th>Rating</th><th>Status</th></tr></thead><tbody>
     ${rows.slice(0,S.allDealers?Infinity:100).map(({id,d,st})=>{ const pct=d.creditLimit?Math.min(100,Math.max(0,st.balance/d.creditLimit*100)):0; const cls=pct>=100?"bad":pct>=80?"warn":""; const pr=isProspect(d)||stageOf(d)==="lost";
-      return `<tr class="click" tabindex="0" data-dealer="${id}"><td><b>${esc(d.name)}</b>${samplePill(d)}${d.active===false?` <span class="pill neutral">Archived</span>`:""}<div class="small muted">${esc(d.phone||"")}${d.area?" · "+esc(d.area):""}</div>${(d.tags||[]).length?`<div>${d.tags.slice(0,3).map(t=>`<span class="pill neutral tag">${esc(t)}</span>`).join(" ")}</div>`:""}</td>
+      return `<tr class="click" tabindex="0" data-dealer="${id}"><td><div class="prod-cell">${avatar(d,32)}<div><b>${esc(d.name)}</b>${samplePill(d)}${d.active===false?` <span class="pill neutral">Archived</span>`:""}<div class="small muted">${esc(d.phone||"")}${d.area?" · "+esc(d.area):""}</div>${(d.tags||[]).length?`<div>${d.tags.slice(0,3).map(t=>`<span class="pill neutral tag">${esc(t)}</span>`).join(" ")}</div>`:""}</div></div></td>
       <td>${stagePill(d)}</td>
       <td class="r num"><b>${pr&&!st.balance?"—":P(st.balance)}</b></td>
       <td class="small num">${pr?`<span class="muted">—</span>`:d.creditLimit?`${Math.round(pct)}% of ${P(d.creditLimit)}<div class="meter"><i class="${cls}" style="width:${pct}%"></i></div>`:`<span class="muted">No limit</span>`}</td>
@@ -1408,11 +1418,50 @@ function followUpsPanel(){
     :`<p class="muted small" style="margin:0">No follow-ups due in the next 7 days.</p>`}
   </section>`;
 }
+/* ---------- dealer photo with crop ---------- */
+// Shows `src` inside `box` with a square selection the user can drag and resize
+// (mouse, touch or arrow keys). Resolves with a 480×480 JPEG of the chosen part,
+// or null if cancelled.
+function cropPicture(box,src){
+  return new Promise(resolve=>{
+    box.hidden=false;
+    box.innerHTML=`<div class="crop-head"><b>Choose the part to keep</b><span class="small muted">Drag the square to move it. Drag its corner to make it bigger or smaller.</span></div>
+      <div class="crop-stage"><img class="crop-img" alt="Picture to crop"><div class="crop-box" tabindex="0" role="slider" aria-label="Crop area. Use arrow keys to move, Shift and arrow keys to resize."><span class="crop-h" aria-hidden="true"></span></div></div>
+      <div class="actions" style="margin-top:10px"><button class="btn primary" type="button" data-crop="ok">Use this part</button><button class="btn" type="button" data-crop="cancel">Cancel</button></div>`;
+    const img=$(".crop-img",box), sel=$(".crop-box",box), stage=$(".crop-stage",box);
+    let r={x:0,y:0,s:0}, W=0, H=0;
+    const draw=()=>{ sel.style.left=r.x+"px"; sel.style.top=r.y+"px"; sel.style.width=sel.style.height=r.s+"px"; };
+    const clamp=()=>{ r.s=Math.max(40,Math.min(r.s,W,H)); r.x=Math.max(0,Math.min(r.x,W-r.s)); r.y=Math.max(0,Math.min(r.y,H-r.s)); draw(); };
+    img.onload=()=>{ W=img.clientWidth; H=img.clientHeight; r.s=Math.round(Math.min(W,H)*0.8); r.x=Math.round((W-r.s)/2); r.y=Math.round((H-r.s)/2); clamp(); sel.focus({preventScroll:true}); };
+    img.onerror=()=>{ toast("That picture couldn't be opened"); done(null); };
+    img.src=src;
+    let drag=null;
+    stage.addEventListener("pointerdown",e=>{ if(!W) return; const resize=e.target.classList.contains("crop-h"), inBox=e.target===sel||resize; if(!inBox) return;
+      e.preventDefault(); stage.setPointerCapture(e.pointerId); drag={resize,px:e.clientX,py:e.clientY,start:{...r}}; });
+    stage.addEventListener("pointermove",e=>{ if(!drag) return; const dx=e.clientX-drag.px, dy=e.clientY-drag.py;
+      if(drag.resize){ r.s=drag.start.s+Math.max(dx,dy); r.x=drag.start.x; r.y=drag.start.y; } else { r.x=drag.start.x+dx; r.y=drag.start.y+dy; r.s=drag.start.s; } clamp(); });
+    const end=()=>{ drag=null; }; stage.addEventListener("pointerup",end); stage.addEventListener("pointercancel",end);
+    sel.addEventListener("keydown",e=>{ const k={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[e.key]; if(!k) return; e.preventDefault(); const step=e.altKey?1:10;
+      if(e.shiftKey) r.s+=(k[0]||-k[1])*step; else { r.x+=k[0]*step; r.y+=k[1]*step; } clamp(); });
+    const done=v=>{ box.hidden=true; box.innerHTML=""; resolve(v); };
+    box.addEventListener("click",e=>{ const b=e.target.closest("[data-crop]"); if(!b) return;
+      if(b.dataset.crop==="cancel") return done(null);
+      const k=img.naturalWidth/W, c=document.createElement("canvas"); c.width=c.height=480;
+      c.getContext("2d").drawImage(img,Math.round(r.x*k),Math.round(r.y*k),Math.round(r.s*k),Math.round(r.s*k),0,0,480,480);
+      c.toBlob(b2=>done(b2),"image/jpeg",0.88); });
+  });
+}
+const avatar=(d,size)=>d&&d.photoId?`<img class="avatar" src="${imgUrl(d.photoId)}" alt="" width="${size||40}" height="${size||40}" loading="lazy">`:`<span class="avatar ph" style="width:${size||40}px;height:${size||40}px;font-size:${Math.round((size||40)*0.4)}px" aria-hidden="true">${esc(((d&&d.name)||"?").trim().split(/\s+/).slice(0,2).map(w=>w[0]).join("").toUpperCase())}</span>`;
 function dealerForm(id,preStage){
   show(()=>{ const d=id?S.dealers.get(id):{name:"",phone:"",area:"",creditLimit:S.settings.defaultLimit??"",terms:S.settings.defaultTerms??30,notes:"",stage:preStage||"dealer"}; const hasTx=id&&dealerTxns(id,true).length;
   const stg=stageOf(d), prospect=isProspect(d);
   return [head(id?"Edit "+(prospect?"prospect":"dealer"):(prospect?"New prospect":"New dealer"),id?"":"Contact details, where they came from and their credit terms.")+`<form id="f" class="form-grid">
     <h3 class="span form-sec">Contact</h3>
+    ${assets?`<div class="f span"><span>Photo</span><div class="photo-row"><div id="d-prev">${avatar(d,88)}</div>
+      <div class="actions"><label class="btn sm" for="d-file" style="cursor:pointer">${d.photoId?"Change photo":"Add photo"}</label><input id="d-file" type="file" accept="image/*" hidden>
+        <label class="btn sm" for="d-cam" style="cursor:pointer">Take photo</label><input id="d-cam" type="file" accept="image/*" capture="user" hidden>
+        <button class="btn sm" type="button" id="d-recrop" ${d.photoId?"":"hidden"}>Adjust crop</button><button class="btn sm" type="button" id="d-rmphoto" ${d.photoId?"":"hidden"}>Remove</button></div></div>
+      <span class="hint">You can also paste a picture (Ctrl+V). You choose which part to keep.</span><div id="d-cropper" class="cropper" hidden></div></div>`:""}
     <label class="f span">Full name<input id="d-name" required maxlength="120" value="${esc(d.name)}" placeholder="e.g. Juana Dela Cruz"></label>
     <label class="f">Mobile number<input id="d-phone" inputmode="tel" value="${esc(d.phone)}" placeholder="0917 123 4567"></label>
     <label class="f">Email<input id="d-email" type="email" value="${esc(d.email||"")}" placeholder="name@example.com"></label>
@@ -1440,7 +1489,22 @@ function dealerForm(id,preStage){
     <p class="err span" id="d-err" style="color:var(--bad);margin:0"></p>
     <div class="actions span"><button class="btn primary" type="submit">${id?"Save changes":prospect?"Add prospect":"Add dealer"}</button><button class="btn" type="button" data-back>Cancel</button>
     ${id?(hasTx?`<button class="btn" type="button" id="d-arch" style="margin-left:auto">${d.active===false?"Restore dealer":"Archive dealer"}</button>`:`<button class="btn danger" type="button" id="d-del" style="margin-left:auto">Delete ${prospect?"prospect":"dealer"}</button>`):""}</div></form>`,sh=>{
+    // Dealer photo: pick, take or paste a picture, then crop it in place.
+    let photoBlob=null, photoRemoved=false;
+    const cur=id?S.dealers.get(id):null;
+    const showPrev=()=>{ const el=$("#d-prev",sh); if(!el) return; const has=photoBlob||(!photoRemoved&&cur&&cur.photoId);
+      el.innerHTML=photoBlob?`<img class="avatar" src="${URL.createObjectURL(photoBlob)}" alt="New photo" width="88" height="88">`:avatar(photoRemoved?{name:$("#d-name",sh).value}:cur||{name:$("#d-name",sh).value},88);
+      $("#d-recrop",sh).hidden=!has; $("#d-rmphoto",sh).hidden=!has; };
+    const crop=async src=>{ const b=await cropPicture($("#d-cropper",sh),src); if(b){ photoBlob=b; photoRemoved=false; showPrev(); } };
+    const pick=f=>{ if(!f) return; if(!f.type.startsWith("image/")){ toast("Choose a picture file"); return; } crop(URL.createObjectURL(f)); };
+    if($("#d-file",sh)){
+      ["d-file","d-cam"].forEach(k=>$("#"+k,sh).addEventListener("change",e=>{ pick(e.target.files[0]); e.target.value=""; }));
+      $("#d-recrop",sh).addEventListener("click",()=>crop(photoBlob?URL.createObjectURL(photoBlob):imgUrl(cur.photoId)));
+      $("#d-rmphoto",sh).addEventListener("click",()=>{ photoBlob=null; photoRemoved=true; showPrev(); });
+      sh.addEventListener("paste",e=>{ const it=[...(e.clipboardData?.items||[])].find(i=>i.type.startsWith("image/")); if(it){ e.preventDefault(); pick(it.getAsFile()); } });
+    }
     $("#f",sh).addEventListener("submit",e=>{ e.preventDefault(); const btn=e.submitter||$("button[type=submit]",sh);
+      if($("#d-cropper",sh)&&!$("#d-cropper",sh).hidden){ toast("Finish cropping the photo first"); return; }
       const name=$("#d-name").value.trim(); if(!name) return;
       const phone=$("#d-phone").value.trim(), digits=phone.replace(/\D/g,"").slice(-10);
       const dup=[...S.dealers.entries()].find(([k,x])=>k!==id&&(x.name.trim().toLowerCase()===name.toLowerCase()||(digits.length>=7&&String(x.phone||"").replace(/\D/g,"").slice(-10)===digits)));
@@ -1456,7 +1520,11 @@ function dealerForm(id,preStage){
       if(prevLim!==data.creditLimit&&(data.creditLimit!=null||id)) data.limitHistory=[...(base.limitHistory||[]),{at:Date.now(),by:S.me,from:prevLim??null,to:data.creditLimit}].slice(-50);
       const obEl=$("#d-ob"), ob=obEl?r2(obEl.value):0, obDate=obEl?($("#d-obdate").value||today()):"";
       const fu=$("#d-fu")&&$("#d-fu").value;
-      guarded(btn,async()=>{ const ref=db.collection("dealers").doc(id||undefined); await ref.set(data);
+      guarded(btn,async()=>{
+        const oldPhoto=base.photoId||null;
+        if(photoBlob){ btn.textContent="Uploading photo…"; const up=await assets.upload(photoBlob); data.photoId=up.id; } else if(photoRemoved) data.photoId=null;
+        const ref=db.collection("dealers").doc(id||undefined); await ref.set(data);
+        if(oldPhoto&&data.photoId!==oldPhoto) assets.delete(oldPhoto).catch(()=>{});
         if(ob>0) await db.collection("txns").doc().set(openingDoc(ref.id,ob,obDate,addDays(obDate,data.terms),""));
         if(fu) await db.collection("interactions").doc().set({dealerId:ref.id,kind:"note",date:today(),outcome:isProspect(data)?"Added as a prospect":"Added as a dealer",note:"",followUp:fu,followUpDone:false,createdAt:Date.now(),createdBy:S.me});
         toast(id?"Saved":ob>0?`Dealer added with ${P(ob)} opening balance`:isProspect(data)?"Prospect added":"Dealer added"); back(); });
@@ -1624,7 +1692,7 @@ function dealerSheet(id){
   const st=status(id); let run=0; const fresh=isProspect(d)&&!dealerTxns(id,true).length;
   const all=dealerTxns(id,true).map(([tid,t])=>{ if(isLive(t)) run=r2(run+txnEffect(t)); return {tid,t,run}; }).reverse();
   resolveNames([d.createdBy]);
-  return [head(esc(d.name)+" "+stagePill(d)+samplePill(d)+(d.active===false?` <span class="pill neutral">Archived</span>`:""),[d.phone,d.area,d.terms!=null?`${d.terms}-day terms`:""].filter(Boolean).map(esc).join(" · "))+`
+  return [head(avatar(d,44)+" "+esc(d.name)+" "+stagePill(d)+samplePill(d)+(d.active===false?` <span class="pill neutral">Archived</span>`:""),[d.phone,d.area,d.terms!=null?`${d.terms}-day terms`:""].filter(Boolean).map(esc).join(" · "))+`
     ${fresh?`<div class="notice info"><p>This prospect hasn't bought on credit yet. Recording their first credit sale makes them a dealer.</p></div>`:`<div class="stat-row">
       <div class="kpi"><div class="lbl">Balance</div><div class="val num">${P(st.balance)}</div></div>
       <div class="kpi ${st.overdue?"bad":""}"><div class="lbl">Overdue</div><div class="val num">${P(st.overdue)}</div></div>

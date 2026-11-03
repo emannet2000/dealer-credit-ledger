@@ -814,3 +814,13 @@ test("personal data: consent, viewer limits, export and removal (PR-06, FR-078)"
   assert.equal(gone.email, undefined);
   assert.ok(!(await owner("GET", "/api/c/interactions")).data.some((i) => i.id === "pd-i2"));
 });
+
+test("dealers can have a cropped photo that viewers don't see", async () => {
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
+  assert.equal((await staff("PUT", "/api/c/dealers/ph1", { data: { name: "Photo Phil", photoId: "notuploaded" } })).status, 400);
+  const id = (await staff("POST", "/api/assets", png, { "Content-Type": "image/png" })).data.id;
+  const r = await staff("PUT", "/api/c/dealers/ph1", { data: { name: "Photo Phil", photoId: id } });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.data.photoId, id);
+  assert.equal((await viewer("GET", "/api/c/dealers")).data.find((d) => d.id === "ph1").data.photoId, undefined);
+});
