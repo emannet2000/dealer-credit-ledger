@@ -30,7 +30,7 @@ test("upgrading an older database keeps accounts and sessions", () => {
 });
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ledger-test-"));
-const { app, close, backupNow } = createApp({ dataDir: dir, logger: { error() {} } });
+const { app, close, backupNow, cleanupAssets } = createApp({ dataDir: dir, logger: { error() {} } });
 let server, base;
 
 function client() {
@@ -653,4 +653,20 @@ test("behind HTTPS: redirects, HSTS and page security policy (PR-05)", async () 
   const run = spawnSync(process.execPath, [path.join(__dirname, "..", "server.js")], { env: { ...process.env, NODE_ENV: "production", COOKIE_SECURE: "false", DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(), "ledger-prod-")) }, encoding: "utf8", timeout: 10000 });
   assert.equal(run.status, 1);
   assert.match(run.stderr, /COOKIE_SECURE=true/);
+});
+
+test("pictures never saved on a record are cleaned up after a day (PR-11)", async () => {
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
+  const up = async () => (await owner("POST", "/api/assets", png, { "Content-Type": "image/png" })).data.id;
+  const orphan = await up(), used = await up(), fresh = await up();
+  await owner("PUT", "/api/c/products/pic-p", { data: { name: "Pictured", dealerPrice: 10, imageId: used } });
+  const db = new Database(path.join(dir, "ledger.db"));
+  db.prepare("UPDATE assets SET created_at = ? WHERE id IN (?, ?)").run(Date.now() - 2 * 864e5, orphan, used);
+  db.close();
+  const removed = cleanupAssets();
+  assert.deepEqual(removed, [orphan]);
+  assert.equal((await owner("GET", "/_blob/" + orphan)).status, 404);
+  assert.equal((await owner("GET", "/_blob/" + used)).status, 200, "pictures in use are kept");
+  assert.equal((await owner("GET", "/_blob/" + fresh)).status, 200, "recent uploads are kept");
+  assert.ok(JSON.stringify((await owner("GET", "/api/audit")).data).includes("asset_cleanup"));
 });
