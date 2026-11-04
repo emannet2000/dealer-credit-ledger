@@ -126,9 +126,9 @@ test("staff can't change credit limits, prices or settings, or delete", async ()
   assert.equal((await viewer("GET", "/api/c/dealers")).status, 200);
 });
 
-test("a dealer keeps first, middle and last names, age, gender and address", async () => {
+test("a dealer keeps first, middle and last names, gender and address", async () => {
   const created = await owner("PUT", "/api/c/dealers/np1", { data: {
-    firstName: " Juana ", middleName: "Santos", lastName: "Dela Cruz", age: 34, gender: "Female",
+    firstName: " Juana ", middleName: "Santos", lastName: "Dela Cruz", age: 34, birthday: "1990-05-05", gender: "Female",
     address: "12 Rizal St, Brgy. San Isidro", phone: "0917 123 4567",
   } });
   assert.equal(created.status, 200);
@@ -137,12 +137,10 @@ test("a dealer keeps first, middle and last names, age, gender and address", asy
   assert.equal(d.firstName, "Juana", "parts are trimmed");
   assert.equal(d.middleName, "Santos");
   assert.equal(d.lastName, "Dela Cruz");
-  assert.equal(d.age, 34);
+  assert.equal(d.age, undefined, "age is worked out from the birthday, never stored");
   assert.equal(d.gender, "female", "gender is stored in a consistent form");
   assert.equal(d.address, "12 Rizal St, Brgy. San Isidro");
 
-  assert.equal((await owner("PUT", "/api/c/dealers/np2", { data: { firstName: "A", lastName: "B", age: 121 } })).status, 400);
-  assert.equal((await owner("PUT", "/api/c/dealers/np2", { data: { firstName: "A", lastName: "B", age: 3.5 } })).status, 400);
   assert.equal((await owner("PUT", "/api/c/dealers/np2", { data: { firstName: "A", lastName: "B", gender: "unknown" } })).status, 400);
 
   // Name parts are enough on their own; the display name is built for the caller.
@@ -156,7 +154,7 @@ test("a dealer keeps first, middle and last names, age, gender and address", asy
   assert.equal(legacy.data.data.firstName, "Juana");
   assert.equal(legacy.data.data.middleName, "S.");
   assert.equal(legacy.data.data.lastName, "Dela Cruz");
-  assert.equal(legacy.data.data.age, 34, "unrelated fields are kept");
+  assert.equal(legacy.data.data.birthday, "1990-05-05", "unrelated fields are kept");
 });
 
 test("staff can edit their own records today, but not other people's", async () => {
@@ -669,7 +667,9 @@ test("the server prices credit sales and saves each sale with its stock change (
   assert.equal(r.status, 200);
   assert.equal(r.data.data.amount, 150);
   assert.equal(await stock(), 6);
-  await owner("DELETE", "/api/c/txns/pr-s3");
+  const s3 = (await owner("GET", "/api/c/txns")).data.find((t) => t.id === "pr-s3").data;
+  assert.equal((await owner("DELETE", "/api/c/txns/pr-s3")).data.code, "use_void", "ledger records are voided, not deleted");
+  assert.equal((await owner("PUT", "/api/c/txns/pr-s3", { data: { ...s3, voided: true } })).status, 200);
   assert.equal(await stock(), 7);
 });
 
@@ -816,7 +816,7 @@ test("personal data: consent, viewer limits, export and removal (PR-06, FR-078)"
   assert.notEqual(v2, v1, "a changed notice gets a new version");
 
   // Staff record consent; the server stamps who, when and which notice.
-  await owner("PUT", "/api/c/dealers/pd1", { data: { name: "Private Pia", firstName: "Private", lastName: "Pia", age: 30, gender: "female", phone: "0917 000 1111", birthday: "1990-05-05", address: "12 Rizal St", notes: "Pays Fridays" } });
+  await owner("PUT", "/api/c/dealers/pd1", { data: { name: "Private Pia", firstName: "Private", lastName: "Pia", gender: "female", phone: "0917 000 1111", birthday: "1990-05-05", address: "12 Rizal St", notes: "Pays Fridays" } });
   const cur = (await owner("GET", "/api/c/dealers")).data.find((d) => d.id === "pd1").data;
   const c1 = await staff("PUT", "/api/c/dealers/pd1", { data: { ...cur, consent: { method: "signed form" } } });
   assert.equal(c1.data.data.consent.noticeVersion, v2);
@@ -848,7 +848,6 @@ test("personal data: consent, viewer limits, export and removal (PR-06, FR-078)"
   assert.equal((await staff("GET", "/api/dealers/pd1/export")).status, 403);
   const ex = await owner("GET", "/api/dealers/pd1/export");
   assert.equal(ex.data.dealer.birthday, "1990-05-05");
-  assert.equal(ex.data.dealer.age, 30);
   assert.equal(ex.data.dealer.gender, "female");
   assert.equal(ex.data.contactLog.length, 1);
   assert.ok(ex.data.accessLog.some((a) => a.action === "view_profile"));
@@ -858,7 +857,7 @@ test("personal data: consent, viewer limits, export and removal (PR-06, FR-078)"
   const refused = await owner("POST", "/api/dealers/pd1/anonymise");
   assert.equal(refused.status, 409);
   assert.equal(refused.data.code, "retention");
-  await owner("PUT", "/api/c/dealers/pd2", { data: { name: "Lost Lena", firstName: "Lost", lastName: "Lena", age: 41, gender: "female", stage: "lost", phone: "0918 222", email: "lena@example.com" } });
+  await owner("PUT", "/api/c/dealers/pd2", { data: { name: "Lost Lena", firstName: "Lost", lastName: "Lena", gender: "female", stage: "lost", phone: "0918 222", email: "lena@example.com" } });
   await owner("PUT", "/api/c/interactions/pd-i2", { data: { dealerId: "pd2", kind: "visit", date: day(0), note: "Not interested" } });
   assert.equal((await owner("POST", "/api/dealers/pd2/anonymise")).status, 200);
   const gone = (await owner("GET", "/api/c/dealers")).data.find((d) => d.id === "pd2").data;
@@ -877,4 +876,51 @@ test("dealers can have a cropped photo that viewers don't see", async () => {
   assert.equal(r.status, 200);
   assert.equal(r.data.data.photoId, id);
   assert.equal((await viewer("GET", "/api/c/dealers")).data.find((d) => d.id === "ph1").data.photoId, undefined);
+});
+
+test("a closed period can't be changed, and reopening needs a reason (FR-073)", async () => {
+  await owner("PUT", "/api/c/dealers/cl1", { data: { name: "Closed Carla", terms: 30, creditLimit: 9000 } });
+  const pay = (id, date, extra = {}) => owner("PUT", "/api/c/txns/" + id, { data: { type: "payment", dealerId: "cl1", date, amount: 100, method: "Cash", ...extra } });
+  assert.equal((await owner("PUT", "/api/c/txns/cl-s1", { data: { type: "sale", opening: true, dealerId: "cl1", date: day(-20), dueDate: day(10), amount: 500 } })).status, 200);
+  const paid = await pay("cl-p1", day(-10));
+  assert.equal(paid.status, 200);
+
+  assert.equal((await staff("POST", "/api/periods/close", { through: day(-5) })).status, 403);
+  assert.equal((await owner("POST", "/api/periods/close", { through: day(0) })).status, 400, "only finished days can be closed");
+  assert.equal((await owner("POST", "/api/periods/close", { through: day(-5) })).status, 200);
+  assert.equal((await owner("POST", "/api/periods/close", { through: day(-6) })).status, 400, "the close date can't move backwards");
+
+  assert.equal((await pay("cl-p2", day(-7))).data.code, "period_closed", "new records can't be dated in a closed period");
+  assert.equal((await owner("PUT", "/api/c/txns/cl-p1", { data: { ...paid.data.data, voided: true } })).data.code, "period_closed");
+  assert.equal((await owner("PUT", "/api/c/txns/cl-p1", { data: { ...paid.data.data, date: day(-1) } })).data.code, "period_closed", "records can't be moved out either");
+  assert.equal((await pay("cl-p3", day(-1))).status, 200, "the open period still works");
+
+  const store = (await owner("GET", "/api/c/settings")).data.find((d) => d.id === "store").data;
+  await owner("PUT", "/api/c/settings/store", { data: { ...store, closedThrough: null, periodLog: [] } });
+  assert.equal((await owner("GET", "/api/c/settings")).data.find((d) => d.id === "store").data.closedThrough, day(-5), "saving settings can't reopen the books");
+
+  assert.equal((await owner("POST", "/api/periods/reopen", {})).status, 400, "a reason is required");
+  assert.equal((await staff("POST", "/api/periods/reopen", { reason: "x" })).status, 403);
+  assert.equal((await owner("POST", "/api/periods/reopen", { reason: "Late receipt found" })).status, 200);
+  assert.equal((await pay("cl-p2", day(-7))).status, 200);
+  const after = (await owner("GET", "/api/c/settings")).data.find((d) => d.id === "store").data;
+  assert.deepEqual(after.periodLog.map((e) => e.action), ["close", "reopen"]);
+  assert.equal(after.periodLog[1].reason, "Late receipt found");
+  assert.ok((await owner("GET", "/api/audit")).data.some((a) => a.action === "period_reopen"));
+});
+
+test("sign-in limits don't lock out colleagues, and stop guessing one account", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ledger-login-"));
+  const h = createApp({ dataDir: dir, logger: { error() {} } }), server = h.app.listen(0);
+  await new Promise((r) => server.once("listening", r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const login = (username, password, ip = "10.0.0.1") => fetch(base + "/api/login", { method: "POST", headers: { "Content-Type": "application/json", "X-Forwarded-For": ip }, body: JSON.stringify({ username, password }) }).then((r) => r.status);
+  try {
+    await fetch(base + "/api/setup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "O", username: "own", password: "secret123" }) });
+    for (let i = 0; i < 10; i++) assert.equal(await login("own", "wrong"), 401);
+    assert.equal(await login("own", "secret123"), 429, "that person is paused from this address");
+    assert.equal(await login("someone", "wrong"), 401, "a colleague on the same connection isn't");
+    for (let i = 0; i < 20; i++) assert.equal(await login("own", "wrong", `10.0.1.${i}`), 401);
+    assert.equal(await login("own", "wrong", "10.0.2.1"), 429, "guessing one account from many addresses is stopped");
+  } finally { server.closeAllConnections(); server.close(); h.close(); fs.rmSync(dir, { recursive: true, force: true }); }
 });

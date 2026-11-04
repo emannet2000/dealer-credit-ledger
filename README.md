@@ -182,7 +182,7 @@ Lists show the most important 100 rows first, with a button to show more.
 | Command | What it runs |
 |---|---|
 | `npm test` | API tests and tests of the browser's business logic (settlement, aging, statements, payment allocation), including a check that browser and server settle every ledger the same way |
-| `CHROME_PATH=/path/to/chrome npm run test:e2e` | Browser tests in headless Chrome: credit sale, payment, offline payment, approval request (skipped without `CHROME_PATH`) |
+| `npm run test:e2e` (set `CHROME_PATH` if Chrome isn't found) | Browser tests in headless Chrome: credit sale, payment, offline payment, approval request (skipped without `CHROME_PATH`) |
 | `npm run test:all` | Both |
 
 GitHub Actions (`.github/workflows/ci.yml`) runs the dependency audit, `npm test` and the browser tests on Node 20 and 22 for every push and pull request. To make failures block merging, turn on branch protection for `main` in the repository settings and require the **CI** checks.
@@ -229,7 +229,10 @@ REQUIREMENTS.md      the 70 functional requirements and acceptance criteria
 lib/app.js           API, sign-in, roles and business rules
 lib/credit.js        balance and overdue rules (oldest delivery paid first)
 lib/db.js            SQLite database and migrations
-public/index.html    the app screens
+public/index.html    the staff app page
+public/app.js        the staff app screens
+public/app.css       the staff app styles
+lib/credit.js        balance rules, shared by the server, staff app and portal
 public/shim.js       connects the screens to the API (live updates, photos, downloads)
 public/login.html    sign-in and first-time setup
 public/portal.html   dealer portal (balance, receipts, online ordering)

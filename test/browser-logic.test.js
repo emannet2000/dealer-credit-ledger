@@ -1,10 +1,12 @@
 "use strict";
-// Tests the business logic in public/index.html (the code the browser runs) and
+// Tests the business logic in public/app.js (the code the browser runs) and
 // checks it agrees with the server's rules in lib/credit.js (PR-07).
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { load } = require("./helpers/page-logic");
 const credit = require("../lib/credit");
+const fs = require("fs");
+const path = require("path");
 // Values made inside the sandbox have the sandbox's Array/Object prototypes; compare plain copies.
 const same = (actual, expected, msg) => assert.deepStrictEqual(JSON.parse(JSON.stringify(actual)), JSON.parse(JSON.stringify(expected)), msg);
 
@@ -81,11 +83,13 @@ test("a statement for a period carries the balance forward and lists what is unp
 });
 
 test("dealer names keep first, middle and last parts, including compound surnames", () => {
-  const L = load(["splitName", "nameParts", "fullName"]);
-  same(L.splitName("Juana Dela Cruz"), { first: "Juana", middle: "", last: "Dela Cruz" });
-  same(L.splitName("Juana Santos Dela Cruz"), { first: "Juana", middle: "Santos", last: "Dela Cruz" });
-  same(L.splitName("Maria S. Dela Cruz"), { first: "Maria", middle: "S.", last: "Dela Cruz" });
-  same(L.splitName("Madonna"), { first: "Madonna", middle: "", last: "" });
+  const L = load(["nameParts", "fullName"]);
+  same(L.nameParts({ name: "Juana Dela Cruz" }), { first: "Juana", middle: "", last: "Dela Cruz" });
+  same(L.nameParts({ name: "Juana Santos Dela Cruz" }), { first: "Juana", middle: "Santos", last: "Dela Cruz" });
+  same(L.nameParts({ name: "Maria S. Dela Cruz" }), { first: "Maria", middle: "S.", last: "Dela Cruz" });
+  same(L.nameParts({ name: "Maria Dela Cruz Santos" }), { first: "Maria", middle: "Dela Cruz", last: "Santos" });
+  same(L.nameParts({ name: "Pedro Santos Jr." }), { first: "Pedro", middle: "", last: "Santos Jr." });
+  same(L.nameParts({ name: "Madonna" }), { first: "Madonna", middle: "", last: "" });
   same(L.nameParts({ firstName: "Ana", lastName: "Reyes", name: "Old Name" }), { first: "Ana", middle: "", last: "Reyes" });
   assert.equal(L.fullName("  Ana ", "S.", "Reyes"), "Ana S. Reyes");
 });
@@ -149,4 +153,19 @@ test("the product form finds existing products by code and name, without mixing 
   same(find({ name: "Soap" }), [], "one shared word isn't enough");
   same(find({ code: "" }), [], "blank codes never match");
   same(find({ name: "Dishwashing Liquid 1L" }, "a"), [], "a record doesn't match itself");
+});
+
+test("age is worked out from the birthday and turns on the day", () => {
+  const { ageOn } = require("../lib/credit");
+  assert.equal(ageOn("1990-05-05", "2026-05-04"), 35);
+  assert.equal(ageOn("1990-05-05", "2026-05-05"), 36);
+  assert.equal(ageOn("", "2026-05-05"), null);
+  assert.equal(ageOn("2030-01-01", "2026-05-05"), null);
+});
+
+test("the dealer portal uses the shared balance rules, with no copy of its own", () => {
+  const portal = fs.readFileSync(path.join(__dirname, "..", "public", "portal.html"), "utf8");
+  assert.match(portal, /<script src="\/credit\.js">/);
+  assert.match(portal, /Credit\.settleEntries\(/);
+  assert.doesNotMatch(portal, /while\(c>0\.004/, "the portal must not settle balances by itself");
 });
