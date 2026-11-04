@@ -950,7 +950,7 @@ This document defines the target functional requirements for the Dealer Credit L
 - **Status:** Implemented
 - **User story:** As store staff, I want to track prospects and every call, visit and message with a dealer, with follow-up reminders, so recruiting and collection conversations don't get lost.
 - **Acceptance criteria:**
-  - A dealer record holds personal details (first, middle and last name, gender, mobile, email, Messenger link, birthday, area, full address), source, referrer, tags and a stage: new lead, contacted, interested, dealer or lost.
+  - A dealer record holds personal details (first, middle and last name, gender (male or female), mobile, email, Messenger link, birthday, area, full address), source, referrer, tags and a stage: new lead, contacted, interested, dealer or lost.
   - Prospects can be added without credit terms and become dealers automatically on their first credit sale; every stage change is kept in a stage history.
   - Staff can log a call, visit, message, meeting or note with an outcome, notes and an optional follow-up date.
   - Open follow-ups due within seven days appear on the overview; overdue ones are highlighted and can be marked done.
@@ -1130,8 +1130,9 @@ This document defines the target functional requirements for the Dealer Credit L
   - While a dealer is entered, the form lists existing dealers with the same mobile number (any format), email or name, and similar names such as a missing middle name or a one-letter typo.
   - While a product is entered, the form lists existing products with the same code or name, and similar names. Different sizes, such as 1L and 2L, don't match.
   - Each match shows details that help tell records apart, is labelled if archived, and can be opened from the form.
-  - An exact match needs a second press to save, so genuine duplicates such as two people with one name are still possible. A similar match only shows a hint.
-  - Editing a record only checks the fields that changed.
+  - An exact match can never be saved. The server refuses it from every screen and import, and archived records count. Two different people with one name are told apart by adding a middle name. A similar match only shows a hint.
+  - A catalog import skips a duplicate row, carries on with the rest and reports what it skipped.
+  - Editing a record only checks the fields that changed, so duplicates from before this rule can still be edited.
 
 ---
 
@@ -1329,7 +1330,7 @@ These apply to every functional requirement above.
 - **Daily operations:** `lib/ops.js` holds the rules and routes for cash close, remittance, checks, proof of payment, reminders and purchasing; `public/ops.js` holds their screens. New collections: `cashcloses`, `remittances`, `reminders`, `proofs`, `suppliers`, `purchases`.
 - **Ledger history:** a transaction can only be voided, never deleted (sample records are the exception). `settings.closedThrough` locks transactions on or before that date; it changes only through `/api/periods/close` and `/api/periods/reopen`. A closed cash day locks that day's payments. A check that bounces inside a locked date is reversed by a debit dated today, so closed books are not rewritten.
 - **Reminders:** `REMINDER_WEBHOOK_URL` receives `{ channel, to, message }` as JSON, with `REMINDER_WEBHOOK_TOKEN` as a bearer token. The server runs hourly from 09:00 to 18:00. Each reminder is keyed by dealer, due date and schedule step, so a sent message is never repeated and a failed one is retried.
-- **Duplicate checks:** `findDealerMatches()` and `findProductMatches()` in `public/app.js` run in the browser as a form is filled in, against the full dealer and product lists including archived records. Anonymised dealers are skipped. They warn but don't block, so two different people can share a name; the server does not enforce uniqueness.
+- **Duplicate checks:** the forms warn as you type with `findDealerMatches()` and `findProductMatches()` in `public/app.js`. `assertUnique()` in `lib/app.js` enforces exact matches using `dealerKeys()` and `productKeys()` in `lib/credit.js`, and answers 409 `duplicate`. Anonymised dealers are skipped. A full restore and `scripts/import-backup.js` copy records as they are and aren't checked.
 - **Dealer CRM:** dealers carry `stage`, `stageHistory`, contact fields and `tags`; contact entries live in the `interactions` collection (`dealerId`, `kind`, `date`, `outcome`, `note`, `followUp`, `followUpDone`). The server promotes a prospect to `dealer` inside the same transaction as its first sale.
 - **Product pictures from the internet:** `POST /api/assets/fetch { url }` downloads a picture on the server (`lib/fetch-image.js`) and stores it like an upload. Only http(s) on ports 80/443; every resolved address must be public (checked at connect time and on each redirect); 8 MB and 12 s limits; the file must really be JPG, PNG, WebP or GIF; a product page link uses its `og:image`. The source link is kept as `imageLink` and in the activity log. `IMAGE_FETCH_ALLOW_PRIVATE=1` lifts the address check and is for tests only.
 - **Settlement:** `settle()` in `lib/credit.js` (the same file is served to the staff app and portal as `/credit.js`, so there is one copy of the rules) processes a dealer's transactions in date order; a payment's `alloc` pays the chosen deliveries first and the rest goes oldest-first. Balances, aging, statements, credit history, receipts and the credit-hold check all use it.

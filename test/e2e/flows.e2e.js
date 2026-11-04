@@ -98,6 +98,9 @@ test("adding a dealer or product shows the existing record and can open it", { s
   await b.click("#f button[type=submit]");
   await b.waitFor("/already has this name/.test(document.querySelector('#d-err')?.innerText||'')");
   assert.equal(await count("dealers"), dealers, "the first press doesn't save");
+  await b.click("#f button[type=submit]");
+  await new Promise((r) => setTimeout(r, 400));
+  assert.equal(await count("dealers"), dealers, "pressing again doesn't save either");
   await b.click("#d-dup-name [data-dup-open]");
   await b.waitFor("!document.querySelector('#d-first') && /Ana Reyes/.test(document.querySelector('.sheet')?.innerText||'')");
   await b.click("[data-close]");
@@ -113,8 +116,12 @@ test("adding a dealer or product shows the existing record and can open it", { s
   await b.waitFor("/already has this name/.test(document.querySelector('#p-err')?.innerText||'')");
   assert.equal(await count("products"), products, "the first press doesn't save");
   await b.click("#f button[type=submit]");
+  await new Promise((r) => setTimeout(r, 400));
+  assert.equal(await count("products"), products, "pressing again doesn't save either");
+  await b.fill("#p-name", "Dish Soap 2L");
+  await b.click("#f button[type=submit]");
   await b.waitFor("!document.querySelector('#p-name')");
-  assert.equal(await count("products"), products + 1, "the second press saves anyway");
+  assert.equal(await count("products"), products + 1, "a different product saves");
 });
 
 test("dealer name boxes line up, and age follows the birthday", { skip }, async () => {

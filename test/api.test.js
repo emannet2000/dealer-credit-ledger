@@ -30,7 +30,7 @@ test("upgrading an older database keeps accounts and sessions", () => {
 });
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ledger-test-"));
-const { app, close, backupNow, cleanupAssets } = createApp({ dataDir: dir, logger: { error() {} } });
+const { app, close, backupNow, cleanupAssets, db: appDb } = createApp({ dataDir: dir, logger: { error() {} } });
 let server, base;
 
 function client() {
@@ -923,4 +923,49 @@ test("sign-in limits don't lock out colleagues, and stop guessing one account", 
     for (let i = 0; i < 20; i++) assert.equal(await login("own", "wrong", `10.0.1.${i}`), 401);
     assert.equal(await login("own", "wrong", "10.0.2.1"), 429, "guessing one account from many addresses is stopped");
   } finally { server.closeAllConnections(); server.close(); h.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a dealer or product can never be added twice (FR-088)", async () => {
+  const dealer = (id, data, who = owner) => who("PUT", "/api/c/dealers/" + id, { data: { terms: 30, ...data } });
+  const product = (id, data, who = owner) => who("PUT", "/api/c/products/" + id, { data: { dealerPrice: 10, srp: 15, stock: 0, active: true, ...data } });
+  assert.equal((await dealer("u1", { name: "Lorna Bautista", phone: "0917 555 0101", email: "Lorna@Example.com" })).status, 200);
+  for (const [id, data] of [["x1", { name: "LORNA  bautista" }], ["x2", { name: "Bautista, Lorna" }], ["x3", { name: "Lórna Bautista" }],
+    ["x4", { name: "Someone Else", phone: "+63 917 555 0101" }], ["x5", { name: "Someone Else", phone: "09175550101" }], ["x6", { name: "Someone Else", email: " lorna@example.COM " }]]) {
+    const r = await dealer(id, data, staff);
+    assert.equal(r.status, 409, JSON.stringify(data));
+    assert.equal(r.data.code, "duplicate");
+  }
+  assert.match((await dealer("x1", { name: "Lorna Bautista" })).data.message, /“Lorna Bautista” already has this name/);
+  assert.equal((await dealer("x1", { firstName: "Lorna", lastName: "Bautista" })).status, 409, "name parts count too");
+  assert.equal((await dealer("u2", { name: "Lorna Reyes Bautista" })).status, 200, "a different full name is allowed");
+  assert.equal((await owner("PATCH", "/api/c/dealers/u2", { data: { name: "Lorna Bautista" } })).status, 409, "renaming into a duplicate is blocked");
+
+  // Two requests at the same moment can't both get through.
+  const race = await Promise.all([dealer("r1", { name: "Racing Rita" }), dealer("r2", { name: "Racing Rita" })]);
+  assert.deepEqual(race.map((r) => r.status).sort(), [200, 409]);
+
+  // Archived records still count; saving a record doesn't clash with itself.
+  const lorna = (await owner("GET", "/api/c/dealers")).data.find((d) => d.id === "u1").data;
+  assert.equal((await dealer("u1", { ...lorna, active: false })).status, 200);
+  assert.match((await dealer("x1", { name: "Lorna Bautista" })).data.message, /\(archived\)/);
+
+  assert.equal((await product("v1", { name: "Dishwashing Liquid 1L", code: "DW-100" })).status, 200);
+  for (const data of [{ name: "dishwashing liquid 1 l" }, { name: "Other", code: "dw 100" }]) assert.equal((await product("y1", data, staff)).data.code, "duplicate");
+  assert.equal((await product("v2", { name: "Dishwashing Liquid 2L", code: "DW-200" })).status, 200, "another size is a different product");
+
+  // Duplicates from before this rule can still be edited, if the clashing field is unchanged.
+  appDb.prepare("INSERT INTO docs (collection, id, data, version, updated_at) VALUES ('products', 'old1', ?, 1, 0)").run(JSON.stringify({ name: "Dishwashing Liquid 1L", dealerPrice: 10, srp: 15, stock: 0 }));
+  assert.equal((await owner("PATCH", "/api/c/products/old1", { data: { active: false } })).status, 200);
+});
+
+test("gender is male or female, or left blank", async () => {
+  const save = (gender) => owner("PUT", "/api/c/dealers/gn1", { data: { name: "Gina Lim", gender } });
+  assert.equal((await save("Male")).data.data.gender, "male");
+  assert.equal((await save("female")).data.data.gender, "female");
+  assert.equal((await save("")).data.data.gender, null);
+  for (const v of ["other", "prefer not to say", "x"]) assert.equal((await save(v)).status, 400, v);
+  appDb.prepare("UPDATE docs SET data = json_set(data, '$.gender', 'other') WHERE collection = 'dealers' AND id = 'gn1'").run();
+  const edit = await owner("PATCH", "/api/c/dealers/gn1", { data: { area: "QC" } });
+  assert.equal(edit.status, 200, "an older value doesn't block other edits");
+  assert.equal(edit.data.data.gender, null);
 });

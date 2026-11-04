@@ -1038,9 +1038,7 @@ function catalogSheet(){
     </div>
     <div id="c-prev" style="margin-top:16px"></div>`,sh=>{
     let plan=null;
-    const match=it=>{ const code=it.code.trim().toLowerCase(), nm=it.name.trim().toLowerCase().replace(/\s+/g," ");
-      for(const [id,p] of S.products){ if(code&&p.code&&p.code.trim().toLowerCase()===code) return id; }
-      for(const [id,p] of S.products){ if(nm&&p.name.trim().toLowerCase().replace(/\s+/g," ")===nm) return id; } return null; };
+    const match=it=>{ const hits=findProductMatches(S.products,{name:it.name,code:it.code}).filter(m=>m.strong); return (hits.find(m=>m.why.some(y=>y.what==="code"))||hits[0]||{}).id||null; };
     const preview=()=>{ const {items,cols,hasHead}=catalogRows($("#c-text",sh).value); const box=$("#c-prev",sh);
       if(!items.length){ plan=null; box.innerHTML=""; return; }
       const seen=new Set(); const rows=items.map(it=>{ const id=match(it); if(id) seen.add(id); const p=id?S.products.get(id):null;
@@ -1080,14 +1078,15 @@ function catalogSheet(){
       for(const [id,p] of plan.missing){ if(arch) jobs.push([id,{...p,active:false,updated:stamp()}]); else if(clr&&p.promo) jobs.push([id,{...p,promo:null,updated:stamp()}]); }
       const pr=$("#c-prog",sh); pr.hidden=false; let k=0; const wantImg=!!($("#c-img",sh)&&$("#c-img",sh).checked); const pics=[];
       const total=jobs.length+(wantImg?jobs.filter(j=>j[2]).length:0);
-      for(const [id,d,img] of jobs){ const ref=db.collection("products").doc(id||undefined); await ref.set(d); if(wantImg&&img) pics.push([ref.id,img,d.imageId||null]); k++; $("i",pr).style.width=(k/total*100)+"%"; }
+      const skipped=[];
+      for(const [id,d,img] of jobs){ const ref=db.collection("products").doc(id||undefined); try{ await ref.set(d); if(wantImg&&img) pics.push([ref.id,img,d.imageId||null]); }catch(err){ if(err&&err.code==="duplicate") skipped.push(d.name); else throw err; } k++; $("i",pr).style.width=(k/total*100)+"%"; }
       let got=0; const failed=[];
       for(const [pid,img,old] of pics){ btn.textContent=`Downloading pictures ${got+failed.length+1} of ${pics.length}…`;
         try{ const up=await assets.fromUrl(img); await db.doc("products/"+pid).update({imageId:up.id,imageLink:up.source||img,updated:stamp()}); if(old) assets.delete(old).catch(()=>{}); got++; }
         catch(e){ failed.push((S.products.get(pid)||{}).name||img); }
         k++; $("i",pr).style.width=(k/total*100)+"%"; }
       if(S.canAdmin) await db.doc("settings/store").set({...S.settings,catalogName:name,catalogAt:now});
-      toast(`${name} applied · ${jobs.length} product${jobs.length===1?"":"s"} updated${got?` · ${got} picture${got===1?"":"s"}`:""}${failed.length?` · ${failed.length} picture${failed.length===1?"":"s"} couldn't be downloaded (${failed.slice(0,3).join(", ")}${failed.length>3?"…":""})`:""}`,failed.length?"error":undefined); back();
+      toast(`${name} applied · ${jobs.length-skipped.length} product${jobs.length-skipped.length===1?"":"s"} updated${skipped.length?` · ${skipped.length} skipped as duplicates (${skipped.slice(0,3).join(", ")}${skipped.length>3?"…":""})`:""}${got?` · ${got} picture${got===1?"":"s"}`:""}${failed.length?` · ${failed.length} picture${failed.length===1?"":"s"} couldn't be downloaded (${failed.slice(0,3).join(", ")}${failed.length>3?"…":""})`:""}`,failed.length?"error":undefined); back();
     });
     let tmr; $("#c-text",sh).addEventListener("input",()=>{ clearTimeout(tmr); tmr=setTimeout(preview,200); });
     $("#c-arch",sh).addEventListener("change",preview);
@@ -1138,7 +1137,7 @@ const stageOf=d=>(d&&d.stage)||"dealer";
 const isProspect=d=>["lead","contacted","interested"].includes(stageOf(d));
 const stagePill=d=>`<span class="pill ${STAGE_C[stageOf(d)]}">${STAGE_L[stageOf(d)]}</span>`;
 // Personal details: names are kept as parts and joined into the display name.
-const GENDERS=[["","Not specified"],["female","Female"],["male","Male"],["other","Other"],["prefer not to say","Prefer not to say"]];
+const GENDERS=[["","Not specified"],["male","Male"],["female","Female"]];
 const GENDER_L=Object.fromEntries(GENDERS);
 const ageHint=b=>{ const a=Credit.ageOn(b,today()); return a==null?"Optional. Age is worked out from this.":`Age ${a}`; };
 function nameParts(d){
@@ -1147,9 +1146,9 @@ function nameParts(d){
 }
 const fullName=(first,middle,last)=>[first,middle,last].map(x=>String(x||"").trim().replace(/\s+/g," ")).filter(Boolean).join(" ");
 // Duplicate checks for the dealer and product forms. Text ignores case, accents and punctuation.
-function normText(s){ return String(s??"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim(); }
+const normText=Credit.normText;
 // The last 10 digits, so 0917 123 4567 and +63 917 123 4567 are the same number.
-function phoneKey(v){ const d=String(v??"").replace(/\D/g,"").slice(-10); return d.length>=7?d:""; }
+const phoneKey=Credit.phoneKey;
 function sameWords(a,b){ return [...new Set(a)].sort().join(" ")===[...new Set(b)].sort().join(" "); }
 // True when two texts differ by one typo: a changed, added, missing or swapped character.
 function oneEditApart(a,b){
@@ -1180,7 +1179,7 @@ function findDealerMatches(dealers,form,exceptId){
   return rankMatches(out);
 }
 // “1 L” and “1L” count as the same size.
-function productWords(s){ const t=normText(s).replace(/(\d)\s+(?=[a-z])/g,"$1"); return t?t.split(" "):[]; }
+const productWords=Credit.productWords;
 function findProductMatches(products,form,exceptId){
   const words=productWords(form.name), n=words.join(" "), code=normText(form.code).replace(/ /g,""), out=[];
   for(const [id,p] of products){
@@ -1410,7 +1409,7 @@ function dealerForm(id,preStage){
       if(!firstName||!lastName){ $("#d-err").textContent="Enter the dealer's first and last name."; (!firstName?$("#d-first"):$("#d-last")).focus(); return; }
       const phone=$("#d-phone").value.trim();
       const dup=dealerDups().find(m=>m.strong);
-      if(dup&&!btn.dataset.ok){ $("#d-err").textContent=`“${dup.item.name}” already has this ${dup.why.find(y=>y.strong).what}. Press the button again to save anyway.`; btn.dataset.ok="1"; return; }
+      if(dup){ $("#d-err").textContent=`“${dup.item.name}”${dup.item.active===false?" (archived)":""} already has this ${dup.why.find(y=>y.strong).what}. Open that record instead of adding it again.`; return; }
       const email=$("#d-email").value.trim(); if(email&&!$("#d-email").checkValidity()){ $("#d-err").textContent="That email address doesn't look right."; return; }
       const lim=$("#d-limit").value.trim();
       const base=id?{...S.dealers.get(id)}:{createdAt:Date.now(),createdBy:S.me,active:true};
@@ -1698,7 +1697,7 @@ function productForm(id){
     $("#f",sh).addEventListener("submit",e=>{ e.preventDefault(); const btn=e.submitter||$("button[type=submit]",sh);
       const name=$("#p-name").value.trim(); if(!name) return; const re=$("#p-re").value.trim(); const link=$("#p-link").value.trim();
       const dup=productDups().find(m=>m.strong);
-      if(dup&&!btn.dataset.ok){ $("#p-err").textContent=`“${dup.item.name}” already has this ${dup.why.find(y=>y.strong).what}. Press the button again to save anyway.`; btn.dataset.ok="1"; return; }
+      if(dup){ $("#p-err").textContent=`“${dup.item.name}”${dup.item.active===false?" (archived)":""} already has this ${dup.why.find(y=>y.strong).what}. Open that record instead of adding it again.`; return; }
       const base=id?{...S.products.get(id)}:{createdAt:Date.now(),createdBy:S.me,active:true,stock:Math.max(0,Math.round(Number($("#p-stock").value)||0))};
       const oldImg=base.imageId||null;
       const data={...base,name,category:$("#p-cat").value.trim(),code:$("#p-code").value.trim(),dealerPrice:r2($("#p-dp").value),cost:$("#p-cost").value===""?null:r2($("#p-cost").value),srp:$("#p-srp").value?r2($("#p-srp").value):null,reorderLevel:re===""?null:Math.max(0,Number(re)),imageLink:/^https?:\/\//i.test(link)?link:null,updated:stamp()};
