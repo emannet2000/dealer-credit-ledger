@@ -122,6 +122,7 @@ input:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,va
 .steps{display:flex;gap:4px;margin:10px 0}
 .steps span{flex:1;height:6px;border-radius:3px;background:var(--sunk)}
 .steps span.on{background:var(--accent)}
+@media print{body *{visibility:hidden}#stmt,#stmt *{visibility:visible}#stmt{position:absolute;left:0;top:0;width:100%}#stmt .no-print{display:none}}
 </style>
 </head>
 <body>
@@ -200,7 +201,12 @@ function render(){
   const tabs=[["unpaid",`Unpaid (${c.open.length})`],["proof","Send proof"],["catalog","Order"],["orders",`My orders${openOrders?` (${openOrders})`:""}`],["history","History"],["account","Account"]];
   html+=`<div class="tabs" role="tablist">${tabs.map(([k,l])=>`<button class="tab" role="tab" type="button" data-tab="${k}" aria-selected="${S.tab===k}">${l}</button>`).join("")}</div>`;
   if(S.tab==="unpaid") html+=c.open.length?`<div class="list">${c.open.slice().reverse().map(o=>`<button class="row" type="button" data-rc="${esc(o.t._id)}"><div><b>${esc(o.t.no||LABEL.sale)}</b><div class="small muted">Released ${fmtDate(o.t.date)} · due ${fmtDate(o.t.dueDate)}</div>${o.rem<o.t.amount-0.004?`<div class="small" style="color:var(--good)">${P(o.t.amount-o.rem)} of ${P(o.t.amount)} paid</div>`:""}</div><div class="r"><b class="num">${P(o.rem)}</b><div>${o.late?`<span class="pill bad">${o.late} days late</span>`:`<span class="pill neutral">Not yet due</span>`}</div></div></button>`).join("")}</div>`:`<div class="empty">You have no unpaid deliveries. Salamat po!</div>`;
-  if(S.tab==="history"){ const all=S.txns.slice().sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.createdAt||0)-(a.createdAt||0));
+  if(S.tab==="statement"){ const rows=live();
+    html+=`<section class="card" id="stmt"><h3 style="font-size:16px;margin-top:0">Statement of account</h3><p class="small muted">${esc(s.storeName||"")} · ${esc(d.name)} · ${today()}</p>
+      <table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th align="left">Date</th><th align="left">Record</th><th align="right">Charge</th><th align="right">Paid</th><th align="right">Balance</th></tr></thead><tbody>
+      ${rows.map(t=>{ const e=txnEffect(t); return `<tr><td>${esc(t.date||"")}</td><td>${esc(t.no||"")}</td><td align="right">${e>0?P(e):""}</td><td align="right">${e<0?P(-e):""}</td><td align="right">${P(c.runAt.get(t))}</td></tr>`; }).join("")}</tbody></table>
+      <p><b>Balance: ${P(c.balance)}</b></p><div class="no-print" style="display:flex;gap:8px"><button class="btn" id="stmtPrint" type="button">Print or save as PDF</button><button class="btn" data-tab="history" type="button">Back</button></div></section>`; }
+  if(S.tab==="history"){ html+=`<button class="btn sm" data-tab="statement" type="button" style="margin-bottom:10px">Statement of account</button>`; const all=S.txns.slice().sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.createdAt||0)-(a.createdAt||0));
     html+=all.length?`<div class="list">${all.map(t=>`<button class="row ${t.voided?"void":""}" type="button" data-rc="${esc(t._id)}"><div><b>${esc(t.opening?"Opening balance":t.payKind==="partial"?"Partial payment":t.payKind==="full"?"Full payment":LABEL[t.type]||t.type)} ${esc(t.no||"")}</b><div class="small muted">${fmtDate(t.date)}${t.type==="payment"?" · "+esc(t.method||""):""}${t.direction?" · "+esc(t.direction):""}${t.voided?" · cancelled":""}</div></div><div class="r"><b class="num amt">${isCharge(t)?"":"−"}${P(t.amount)}</b>${t.voided?"":`<div class="small muted num">Balance ${P(c.runAt.get(t))}</div>`}</div></button>`).join("")}</div>`:`<div class="empty">No transactions yet.</div>`; }
   if(S.tab==="proof"){ const P_L={pending:["Waiting for the store","neutral"],approved:["Approved","good"],rejected:["Not accepted","bad"]}, list=S.proofs.slice().sort((a,b)=>b.submittedAt-a.submittedAt);
     html+=`<section class="card"><h3 style="font-size:16px;margin-top:0">Paid by GCash, Maya or bank?</h3><p class="small muted">Send your receipt here. Your balance changes once the store checks it.</p>
@@ -281,6 +287,7 @@ function orderDetail(id){
 }
 function bump(pid,d){ const q=Math.max(0,(S.cart.get(pid)||0)+d); if(q) S.cart.set(pid,q); else S.cart.delete(pid); saveCart(); }
 document.addEventListener("keydown",e=>{ if(e.key==="Escape") $("#modalRoot").innerHTML=""; });
+document.addEventListener("click",e=>{ if(e.target.id==="stmtPrint") window.print(); });
 document.addEventListener("click",e=>{
   const tb=e.target.closest("[data-tab]"); if(tb){ S.tab=tb.dataset.tab; render(); const m=$("#main"); m.classList.remove("tab-in"); void m.offsetWidth; m.classList.add("tab-in"); return; }
   const rc=e.target.closest("[data-rc]"); if(rc){ receipt(rc.dataset.rc); return; }

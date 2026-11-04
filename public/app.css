@@ -358,3 +358,15 @@ dl.kv dd{margin:0;overflow-wrap:anywhere}
   .ops-tbl td:empty{display:none}
   .ops-tbl .actions{justify-content:flex-start!important;margin-top:6px}
 }
+/* Camera barcode scanner */
+.scan-box{position:fixed;inset:0;z-index:1000;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:16px}
+.scan-box video{width:100%;max-width:520px;border-radius:8px}
+/* Thermal receipt printers: the paper width is chosen per device in Store */
+@media print{
+  html[data-paper] .receipt{font-size:11px;line-height:1.25}
+  html[data-paper] .receipt table{width:100%}
+  html[data-paper] .receipt th,html[data-paper] .receipt td{padding:1px 2px}
+  html[data-paper] .receipt img{max-width:28mm}
+  html[data-paper="58"] .receipt{font-size:10px}
+  html[data-paper="58"] .rc-tbl{font-size:9px}
+}

@@ -22,6 +22,8 @@ input:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline
 button{font:600 15px "Public Sans",system-ui,sans-serif;background:var(--accent);color:var(--accent-fg);border:0;border-radius:8px;padding:11px;cursor:pointer}
 button[disabled]{opacity:.6}
 .err{background:var(--bad-soft);color:var(--bad);border-radius:8px;padding:10px 12px;font-size:14px}
+.link{background:none;color:var(--accent);padding:6px 0;font-size:14px;font-weight:600;text-decoration:underline;width:auto}
+.ok{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:14px}
 </style>
 </head>
 <body>
@@ -36,6 +38,16 @@ button[disabled]{opacity:.6}
     <label id="codeRow" hidden>Code from your authenticator app<input id="code" inputmode="numeric" autocomplete="one-time-code" placeholder="6 digits, or a recovery code"></label>
     <button id="go" type="submit">Sign in</button>
   </form>
+  <button class="link" id="forgot" type="button">Forgot password?</button>
+  <div id="fp" hidden>
+    <p class="ok" id="fpMsg" hidden></p>
+    <p style="font-size:14px">Enter your username above, then ask the owner to set a new password.</p>
+    <button id="fpAsk" type="button">Ask the owner</button>
+    <p style="font-size:14px">Using two-step sign-in? A recovery code resets it right away.</p>
+    <label>Recovery code<input id="fpCode" autocomplete="off"></label>
+    <label>New password<input id="fpPw" type="password" autocomplete="new-password" placeholder="At least 8 characters"></label>
+    <button id="fpReset" type="button">Reset password</button>
+  </div>
 </main>
 <script>
 (async () => {
@@ -48,6 +60,17 @@ button[disabled]{opacity:.6}
     history.replaceState(null, "", "/login");
   }
   let setup = false;
+  const fpSay = (t) => { $("#fpMsg").textContent = t; $("#fpMsg").hidden = false; };
+  const fpPost = async (url, body) => {
+    if (!body.username) { fpSay("Enter your username first."); return null; }
+    const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
+    const d = r ? await r.json().catch(() => ({})) : {};
+    if (!r || !r.ok) { fpSay(d.message || "Couldn't reach the server. Try again."); return null; }
+    return d;
+  };
+  $("#forgot").addEventListener("click", () => { $("#fp").hidden = !$("#fp").hidden; });
+  $("#fpAsk").addEventListener("click", async () => { if (await fpPost("/api/password/forgot", { username: $("#username").value.trim() })) fpSay("The owner has been told. They'll give you a new password."); });
+  $("#fpReset").addEventListener("click", async () => { if (await fpPost("/api/password/recover", { username: $("#username").value.trim(), code: $("#fpCode").value, password: $("#fpPw").value })) { fpSay("Password changed. Sign in with the new one."); $("#password").value = ""; } });
   // The sign-in handler is attached before anything is awaited, so an early click can't reload the page.
   $("#f").addEventListener("submit", async (e) => {
     e.preventDefault();

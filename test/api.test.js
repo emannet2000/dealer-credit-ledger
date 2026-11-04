@@ -22,7 +22,7 @@ test("upgrading an older database keeps accounts and sessions", () => {
     PRAGMA user_version = 1;`);
   old.close();
   const db = openDb(d);
-  assert.equal(db.pragma("user_version", { simple: true }), 5);
+  assert.equal(db.pragma("user_version", { simple: true }), 6);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM users").get().n, 1);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM sessions").get().n, 1, "sessions survive the upgrade");
   db.prepare("INSERT INTO users (id, username, name, role, password_hash, active, created_at, dealer_id) VALUES ('u2','m','M','dealer','x',1,1,'d1')").run();
@@ -628,7 +628,8 @@ test("the server prices credit sales and saves each sale with its stock change (
   assert.equal(ok.status, 200);
   assert.equal(ok.data.data.amount, 300);
   assert.equal(ok.data.data.subtotal, 400);
-  assert.equal(ok.data.data.items[0].cost, 90);
+  assert.equal(ok.data.data.items[0].cost, undefined, "staff don't get cost prices back");
+  assert.equal((await owner("GET", "/api/c/txns")).data.find((t) => t.id === ok.data.id).data.items[0].cost, 90, "the cost is still kept for reports");
   assert.equal(ok.data.data.manualPrice, undefined);
   assert.equal(await stock(), 8, "stock moved with the sale");
 

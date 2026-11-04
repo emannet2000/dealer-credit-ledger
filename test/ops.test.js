@@ -274,16 +274,16 @@ test("suppliers, purchase orders and goods received (FR-019 to FR-021)", async (
   assert.equal((await staff("POST", "/api/purchases/p1/receive", { lines: [] })).status, 400);
   const part = await staff("POST", "/api/purchases/p1/receive", { date: today(), ref: "DN-1", lines: [{ productId: "g1", qty: 6, cost: 1 }], invoice: { no: "INV-9", amount: 270, dueDate: day(30) } });
   assert.equal(part.status, 200);
-  assert.equal(part.data.data.status, "partial");
+  assert.equal(part.data.status, "partial");
   assert.equal((await doc("products", "g1")).stock, 11);
   assert.equal((await doc("products", "g1")).cost, 45, "staff can't change the cost; the order's cost is used");
   assert.equal((await doc("products", "g2")).stock, 0);
-  assert.equal(part.data.data.receipts[0].invoice.no, "INV-9");
+  assert.equal((await doc("purchases", "p1")).receipts[0].invoice.no, "INV-9");
   assert.ok((await owner("GET", "/api/c/moves")).data.some((m) => m.data.reason === "Purchase received" && m.data.qty === 6));
   assert.equal((await owner("PUT", "/api/c/purchases/p1", { data: { ...po, status: "cancelled" } })).status, 409, "received goods can't be cancelled away");
 
   const rest = await owner("POST", "/api/purchases/p1/receive", { lines: [{ productId: "g1", qty: 4, cost: 50 }, { productId: "g2", qty: 4 }] });
-  assert.equal(rest.data.data.status, "received");
+  assert.equal(rest.data.status, "received");
   assert.equal((await doc("products", "g1")).cost, 50, "an owner can record the new cost");
   assert.equal((await staff("POST", "/api/purchases/p1/receive", { lines: [{ productId: "g1", qty: 1 }] })).status, 409);
   assert.equal((await owner("DELETE", "/api/c/suppliers/s1")).status, 409, "suppliers on a purchase order can't be deleted");

@@ -2,14 +2,14 @@
 "use strict";
 /* ================= state ================= */
 const S = {
-  dealers:new Map(), products:new Map(), txns:new Map(), moves:new Map(), orders:new Map(), interactions:new Map(), approvals:new Map(), cashcloses:new Map(), remittances:new Map(), reminders:new Map(), proofs:new Map(), suppliers:new Map(), purchases:new Map(), settings:{},
-  loaded:{dealers:false,products:false,txns:false,moves:false,orders:false,interactions:false,approvals:false,cashcloses:false,remittances:false,reminders:false,proofs:false,suppliers:false,purchases:false,settings:false},
+  dealers:new Map(), products:new Map(), txns:new Map(), moves:new Map(), orders:new Map(), interactions:new Map(), approvals:new Map(), cashcloses:new Map(), remittances:new Map(), reminders:new Map(), proofs:new Map(), suppliers:new Map(), purchases:new Map(), expenses:new Map(), locations:new Map(), signoffs:new Map(), settings:{},
+  loaded:{dealers:false,products:false,txns:false,moves:false,orders:false,interactions:false,approvals:false,cashcloses:false,remittances:false,reminders:false,proofs:false,suppliers:false,purchases:false,expenses:false,locations:false,signoffs:false,settings:false},
   canWrite:true, canAdmin:false, me:null, names:{},
   view:"overview", q:"", txFilter:"all", showArchived:false, catFilter:"", stageF:"all", tagF:"",
   range:{preset:"month",from:"",to:""}
 };
 let db=null, downloads=null, assets=null, userNs=null;
-const COLS=["dealers","products","txns","moves","orders","interactions","approvals","cashcloses","remittances","reminders","proofs","suppliers","purchases"];
+const COLS=["dealers","products","txns","moves","orders","interactions","approvals","cashcloses","remittances","reminders","proofs","suppliers","purchases","expenses","locations","signoffs"];
 
 /* ================= helpers ================= */
 const $=(s,el=document)=>el.querySelector(s);
@@ -544,7 +544,8 @@ function vReports(){
     <div class="kpi"><div class="lbl">Returns</div><div class="val num">${P(tot.return)}</div><div class="sub">Net sales ${P(net)}</div></div>
     <div class="kpi good"><div class="lbl">Collections</div><div class="val num">${P(tot.payment)}</div><div class="sub">${net>0?`${Math.round(tot.payment/net*100)}% of net sales`:"Payments received"}</div></div>
     <div class="kpi"><div class="lbl">Transactions</div><div class="val num">${tot.count}</div><div class="sub">Voided ones not counted</div></div>
-    <div class="kpi ${tot.profit<0?"bad":"good"}"><div class="lbl">Gross profit</div><div class="val num">${P(tot.profit)}</div><div class="sub">${tot.sale-tot.return>0?`${Math.round(tot.profit/(tot.sale-tot.return)*100)}% margin`:"Cost of goods sold"}</div></div>
+    ${S.canAdmin?window.LedgerOps.netProfitKpi(tot.profit,rangeDates()):""}
+    <div class="kpi ${tot.profit<0?"bad":"good"}" ${S.acct&&S.acct.role==="staff"?"hidden":""}><div class="lbl">Gross profit</div><div class="val num">${P(tot.profit)}</div><div class="sub">${tot.sale-tot.return>0?`${Math.round(tot.profit/(tot.sale-tot.return)*100)}% margin`:"Cost of goods sold"}</div></div>
     <div class="kpi ${tot.writeoff?"bad":""}"><div class="lbl">Write-offs</div><div class="val num">${P(tot.writeoff)}</div><div class="sub">${tot.adjustmentDebit||tot.adjustmentCredit?`Adjustments: +${P(tot.adjustmentDebit)} / −${P(tot.adjustmentCredit)}`:"Bad debt removed"}</div></div>
   </div>
   <div class="grid2e">
@@ -624,6 +625,7 @@ const apPill=r=>`<span class="pill ${APP_C[apStatus(r)]}">${APP_L[apStatus(r)]||
 function apBlockText(b){ if(!b) return ""; const out=[];
   if(b.hold) out.push(`On credit hold · ${b.maxLate} days late (limit ${b.holdDays})`);
   if(b.over) out.push(`Over the credit limit · balance ${P(b.balance)} of ${P(b.creditLimit)}`);
+  if(b.discount) out.push(b.discount);
   if(b.overdue) out.push(`${P(b.overdue)} overdue`); return out.join(" · "); }
 const hoursLeft=ms=>{ const h=Math.max(0,(ms-Date.now())/3600e3); return h>=1?`${Math.round(h)} h left`:`${Math.max(1,Math.round(h*60))} min left`; };
 function askApproval(data,opts,paidMethod,serverMsg){
@@ -695,17 +697,17 @@ function offlineText(){ const o=offState(); if(!o) return "";
   if(n) return `${o.syncing?"Syncing":"Waiting to sync"} ${n} payment${n===1?"":"s"}…${r}`;
   return h?`Saved · updates live${r}`:""; }
 function offlineNotices(){ const o=offState(); if(!o) return ""; const out=[];
-  if(!o.online) out.push(`<div class="notice info"><p><b>You're offline.</b> Showing balances saved on this device${o.lastSync?` at ${esc(fmtStamp(o.lastSync))}`:""}. You can still record payments; they sync automatically when you're back online.</p></div>`);
-  if(o.held.length) out.push(`<div class="notice bad"><p><b>${o.held.length} offline payment${o.held.length===1?"":"s"} need${o.held.length===1?"s":""} review.</b> The server didn't accept ${o.held.length===1?"it":"them"} when syncing.</p><button class="btn sm" data-act="held-review" type="button">Review</button></div>`);
+  if(!o.online) out.push(`<div class="notice info"><p><b>You're offline.</b> Showing balances saved on this device${o.lastSync?` at ${esc(fmtStamp(o.lastSync))}`:""}. You can still record payments, sales and returns; they sync automatically when you're back online.</p></div>`);
+  if(o.held.length) out.push(`<div class="notice bad"><p><b>${o.held.length} offline record${o.held.length===1?"":"s"} need${o.held.length===1?"s":""} review.</b> The server didn't accept ${o.held.length===1?"it":"them"} when syncing.</p><button class="btn sm" data-act="held-review" type="button">Review</button></div>`);
   return out.join(""); }
 function heldSheet(){
   show(()=>{ const o=offState(), held=o?o.held:[];
-    return [head("Offline payments to review","These were recorded without signal, but the server refused them when syncing.")+(held.length?`<ul class="crm-log">${held.map(h=>{ const d=S.dealers.get(h.data.dealerId); return `<li>
-        <div class="crm-meta"><b>${esc(d?d.name:"(dealer removed)")}</b> · <b class="num">${P(h.data.amount)}</b></div>
+    return [head("Offline records to review","These were recorded without signal, but the server refused them when syncing.")+(held.length?`<ul class="crm-log">${held.map(h=>{ const d=S.dealers.get(h.data.dealerId); return `<li>
+        <div class="crm-meta"><b>${esc(d?d.name:"(dealer removed)")}</b> · ${esc(TYPE_LABEL[h.data.type]||"")} · <b class="num">${P(h.data.amount)}</b></div>
         <div class="small muted">${fmtDate(h.data.date)} · ${esc(h.data.method||"")}${h.data.ref?" · Ref "+esc(h.data.ref):""} · recorded ${esc(fmtStamp(h.data.offline&&h.data.offline.recordedAt))}</div>
         <div class="notice bad" style="margin:8px 0"><p class="small">${esc(h.error)}</p></div>
         <div class="actions"><button class="btn sm" data-held-retry="${esc(h.id)}" type="button">Try again</button>${S.canAdmin?`<button class="btn sm primary" data-held-confirm="${esc(h.id)}" type="button">Record anyway</button>`:""}<button class="btn sm danger" data-held-discard="${esc(h.id)}" type="button">Discard</button></div></li>`; }).join("")}</ul><p class="small muted">“Record anyway” is for an owner or editor who has checked the payment, for example when the dealer was archived after it was collected. Discarding removes it from this device for good.</p>`
-      :`<div class="empty"><p>Nothing to review. All offline payments have synced.</p></div>`),sh=>{
+      :`<div class="empty"><p>Nothing to review. All offline records have synced.</p></div>`),sh=>{
       $$("[data-held-retry]",sh).forEach(b=>b.addEventListener("click",()=>guarded(b,async()=>{ await window.APP.retryHeld(b.dataset.heldRetry,false); toast(offState().held.some(h=>h.id===b.dataset.heldRetry)?"Still refused":"Payment synced"); paintSheet(true); })));
       $$("[data-held-confirm]",sh).forEach(b=>b.addEventListener("click",()=>guarded(b,async()=>{ await window.APP.retryHeld(b.dataset.heldConfirm,true); toast(offState().held.some(h=>h.id===b.dataset.heldConfirm)?"Still refused":"Payment recorded"); paintSheet(true); })));
       $$("[data-held-discard]",sh).forEach(b=>b.addEventListener("click",()=>{ if(armed(b,"Tap again to discard")) guarded(b,async()=>{ await window.APP.discardHeld(b.dataset.heldDiscard); toast("Payment discarded"); paintSheet(true); }); }));
@@ -1181,11 +1183,12 @@ function findDealerMatches(dealers,form,exceptId){
 // “1 L” and “1L” count as the same size.
 const productWords=Credit.productWords;
 function findProductMatches(products,form,exceptId){
-  const words=productWords(form.name), n=words.join(" "), code=normText(form.code).replace(/ /g,""), out=[];
+  const words=productWords(form.name), n=words.join(" "), code=normText(form.code).replace(/ /g,""), barcode=normText(form.barcode).replace(/ /g,""), out=[];
   for(const [id,p] of products){
     if(id===exceptId) continue;
     const w=productWords(p.name), m=w.join(" "), why=[];
     if(code&&normText(p.code).replace(/ /g,"")===code) why.push({slot:"product",strong:true,what:"code"});
+    if(barcode&&normText(p.barcode).replace(/ /g,"")===barcode) why.push({slot:"product",strong:true,what:"barcode"});
     if(n&&m){
       const [short,long]=words.length<=w.length?[words,w]:[w,words];
       if(sameWords(words,w)) why.push({slot:"product",strong:true,what:"name"});
@@ -1603,7 +1606,7 @@ function dealerSheet(id){
     </div>`}
     ${st.maxLate>holdDays()?`<div class="notice bad"><p><b>On credit hold.</b> The oldest unpaid delivery is ${st.maxLate} days late. New credit sales are blocked until they pay${S.canAdmin?", unless you approve one":""}.</p></div>`:""}
     ${!d.creditLimit&&!fresh&&S.canWrite?`<div class="notice warn"><p>No credit limit set for this dealer. Set one so the app can warn you before risky releases.</p></div>`:""}
-    ${S.canWrite?`<div class="actions" style="margin-bottom:16px"><button class="btn primary" data-act="sale-for" data-id="${id}" type="button">+ Credit sale</button>${fresh?"":`<button class="btn" data-act="pay-for" data-id="${id}" type="button">+ Payment</button><button class="btn" data-act="ret-for" data-id="${id}" type="button">+ Return</button>${S.canAdmin?`<button class="btn" data-act="adjust-for" data-id="${id}" type="button">+ Adjustment</button><button class="btn danger" data-act="writeoff-for" data-id="${id}" type="button">+ Write-off</button>`:""}<button class="btn" data-act="remind-copy" data-id="${id}" type="button">Copy reminder</button>`}<button class="btn" data-act="opening-for" data-id="${id}" type="button">+ Opening balance</button>${qrReady()?`<button class="btn" data-act="dealer-qr" data-id="${id}" type="button">QR code</button>`:""}${window.APP&&S.acct&&S.acct.role==="owner"?`<button class="btn" data-act="portal-for" data-id="${id}" type="button">Portal access</button>`:""}<button class="btn" data-act="edit-dealer" data-id="${id}" type="button">Edit dealer</button></div>`:""}
+    ${S.canWrite?`<div class="actions" style="margin-bottom:16px"><button class="btn primary" data-act="sale-for" data-id="${id}" type="button">+ Credit sale</button>${fresh?"":`<button class="btn" data-act="pay-for" data-id="${id}" type="button">+ Payment</button><button class="btn" data-act="ret-for" data-id="${id}" type="button">+ Return</button>${S.canAdmin?`<button class="btn" data-act="adjust-for" data-id="${id}" type="button">+ Adjustment</button><button class="btn danger" data-act="writeoff-for" data-id="${id}" type="button">+ Write-off</button>`:""}<button class="btn" data-act="remind-copy" data-id="${id}" type="button">Copy reminder</button>`}<button class="btn" data-act="opening-for" data-id="${id}" type="button">+ Opening balance</button>${qrReady()?`<button class="btn" data-act="dealer-qr" data-id="${id}" type="button">QR code</button>`:""}${window.APP&&S.acct&&S.acct.role==="owner"?`<button class="btn" data-act="portal-for" data-id="${id}" type="button">Portal access</button>`:""}<button class="btn" data-act="edit-dealer" data-id="${id}" type="button">Edit dealer</button>${S.canAdmin?`<button class="btn" data-act="ops-merge" data-kind="dealers" data-id="${id}" type="button">Merge a duplicate</button>`:""}</div>`:""}
     ${d.notes?`<p class="small"><b>Notes:</b> ${esc(d.notes)}</p>`:""}
     ${isProspect(d)?crmPanel(id):""}
     ${fresh?"":`    <section class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>Statement to send</h2><div class="actions"><button class="btn sm" type="button" data-act="statement" data-id="${id}">Full statement</button><button class="btn sm" type="button" data-act="aging-for" data-id="${id}">Aging</button><button class="btn sm" type="button" id="copyStmt">Copy text</button></div></div>
@@ -1642,6 +1645,7 @@ function productForm(id){
     <label class="f span">Product name<input id="p-name" required maxlength="160" value="${esc(p.name)}" placeholder="Name and size, e.g. Dishwashing Liquid 1L"></label>
     <label class="f">Category<input id="p-cat" list="catList" value="${esc(p.category||"")}" placeholder="e.g. Home care"><datalist id="catList">${cats.map(c=>`<option value="${esc(c)}">`).join("")}</datalist></label>
     <label class="f">Code / SKU<input id="p-code" value="${esc(p.code)}"></label>
+    <div class="f"><label for="p-barcode">Barcode</label><div class="link-row"><input id="p-barcode" inputmode="numeric" maxlength="40" value="${esc(p.barcode||"")}"><button class="btn" type="button" data-scan="#p-barcode">Scan</button></div></div>
     <div class="span dup-slot" id="p-dup" role="status" aria-live="polite"></div>
     <label class="f">SRP / catalog price (₱)<input id="p-srp" type="number" min="0" step="0.01" value="${esc(p.srp??"")}"><span class="hint">Credit sales use this price, less the dealer discount.</span></label>
     <label class="f">Dealer price (₱)<input id="p-dp" type="number" min="0" step="0.01" required value="${esc(p.dealerPrice)}"><span class="hint" id="p-dph">Price the dealer pays after discount.</span></label>
@@ -1656,15 +1660,15 @@ function productForm(id){
       <label class="chk span"><input type="checkbox" id="p-pnod" ${p.promo&&p.promo.noDiscount?"checked":""} ${S.canAdmin?"":"disabled"}> Promo price is final (no dealer discount on top)</label></div></div>
     <p class="err span" id="p-err" role="alert" aria-live="polite" style="color:var(--bad);margin:0"></p>
     <div class="actions span"><button class="btn primary" type="submit">${id?"Save changes":"Add product"}</button><button class="btn" type="button" data-back>Cancel</button>
-    ${id?`<button class="btn" type="button" data-act="stock-for" data-id="${id}">Stock in / adjust</button>${qrReady()?`<button class="btn" type="button" data-act="product-qr" data-id="${id}">QR label</button>`:""}`:""}
+    ${id?`<button class="btn" type="button" data-act="stock-for" data-id="${id}">Stock in / adjust</button>${S.canAdmin?`<button class="btn" type="button" data-act="ops-merge" data-kind="products" data-id="${id}">Merge a duplicate</button>`:""}${qrReady()?`<button class="btn" type="button" data-act="product-qr" data-id="${id}">QR label</button>`:""}`:""}
     ${id?(used?`<button class="btn" type="button" id="p-arch" style="margin-left:auto">${p.active===false?"Restore product":"Archive product"}</button>`:`<button class="btn danger" type="button" id="p-del" style="margin-left:auto">Delete product</button>`):""}</div></form>
     ${(p.priceHistory||[]).length?`<section class="panel" style="margin-top:16px"><h2>Price history</h2><table><tbody>${p.priceHistory.slice().reverse().map(h=>`<tr><td class="small nowrap">${fmtStamp(h.at)}</td><td class="small">${esc(h.catalog||"")}</td><td class="r num small">${h.from!=null?P(h.from):"—"} → <b>${P(h.to)}</b></td></tr>`).join("")}</tbody></table></section>`:""}
     ${mv.length?`<section class="panel" style="margin-top:16px"><h2>Recent stock changes</h2><table><tbody>${mv.map(m=>`<tr><td class="small nowrap">${fmtDate(m.date)}</td><td class="small">${esc(m.reason)}${m.note?" · "+esc(m.note):""}</td><td class="r num">${m.qty>0?"+":""}${m.qty}</td></tr>`).join("")}</tbody></table></section>`:""}`,sh=>{
     // Look for this product as the form is filled in. An edit only checks what changed.
     const fresh=(v,old)=>id&&normText(v)===normText(old)?"":v;
-    const productDups=()=>findProductMatches(S.products,{name:fresh($("#p-name",sh).value,p.name),code:fresh($("#p-code",sh).value,p.code)},id);
+    const productDups=()=>findProductMatches(S.products,{name:fresh($("#p-name",sh).value,p.name),code:fresh($("#p-code",sh).value,p.code),barcode:fresh($("#p-barcode",sh).value,p.barcode)},id);
     const productLine=m=>[m.item.code,`${m.item.stock||0} on hand`,P(m.item.dealerPrice)].filter(Boolean).join(" · ");
-    $("#f",sh).addEventListener("input",e=>{ $("#p-err",sh).textContent=""; delete $("button[type=submit]",sh).dataset.ok; if(e.target.matches("#p-name,#p-code")) $("#p-dup",sh).innerHTML=dupPanel(productDups(),"product",productLine); });
+    $("#f",sh).addEventListener("input",e=>{ $("#p-err",sh).textContent=""; delete $("button[type=submit]",sh).dataset.ok; if(e.target.matches("#p-name,#p-code,#p-barcode")) $("#p-dup",sh).innerHTML=dupPanel(productDups(),"product",productLine); });
     $("#f",sh).addEventListener("click",e=>{ const o=e.target.closest("[data-dup-open]"); if(o){ back(); productForm(o.dataset.dupOpen); } });
     const srpIn=$("#p-srp",sh), dpIn=$("#p-dp",sh); let dpTouched=!!dpIn.value;
     dpIn.addEventListener("input",()=>{ dpTouched=true; });
@@ -1700,7 +1704,7 @@ function productForm(id){
       if(dup){ $("#p-err").textContent=`“${dup.item.name}”${dup.item.active===false?" (archived)":""} already has this ${dup.why.find(y=>y.strong).what}. Open that record instead of adding it again.`; return; }
       const base=id?{...S.products.get(id)}:{createdAt:Date.now(),createdBy:S.me,active:true,stock:Math.max(0,Math.round(Number($("#p-stock").value)||0))};
       const oldImg=base.imageId||null;
-      const data={...base,name,category:$("#p-cat").value.trim(),code:$("#p-code").value.trim(),dealerPrice:r2($("#p-dp").value),cost:$("#p-cost").value===""?null:r2($("#p-cost").value),srp:$("#p-srp").value?r2($("#p-srp").value):null,reorderLevel:re===""?null:Math.max(0,Number(re)),imageLink:/^https?:\/\//i.test(link)?link:null,updated:stamp()};
+      const data={...base,name,category:$("#p-cat").value.trim(),code:$("#p-code").value.trim(),barcode:$("#p-barcode").value.trim(),dealerPrice:r2($("#p-dp").value),cost:$("#p-cost").value===""?null:r2($("#p-cost").value),srp:$("#p-srp").value?r2($("#p-srp").value):null,reorderLevel:re===""?null:Math.max(0,Number(re)),imageLink:/^https?:\/\//i.test(link)?link:null,updated:stamp()};
       data.discountPct=$("#p-pct").value===""?null:Math.min(100,Math.max(0,Number($("#p-pct").value)));
       { const pp=r2($("#p-promo").value); data.promo=pp>0?{...(base.promo||{}),price:pp,from:$("#p-pfrom").value||null,to:$("#p-pto").value||null,noDiscount:$("#p-pnod").checked}:null; }
       if(id&&Number(base.srp||0)!==Number(data.srp||0)) data.priceHistory=[...(base.priceHistory||[]),{at:Date.now(),by:S.me,catalog:"Edited",from:base.srp??null,to:data.srp}].slice(-36);
@@ -1768,12 +1772,13 @@ function itemsForm(kind,dealerId,editId,opts){
     <div class="form-grid">
       <label class="f span">Dealer<select id="s-dealer" required><option value="">Choose dealer…</option>${dealerOptions(startDealer)}</select></label>
       <label class="f">${isSale?"Date released":"Date returned"}<input id="s-date" type="date" required value="${old?old.date:today()}"></label>
+      ${isSale&&!old&&[...S.locations.values()].some(l=>l.active!==false)?`<label class="f">Release from<select id="s-loc"><option value="">Main store</option>${[...S.locations.entries()].filter(([,l])=>l.active!==false).map(([k,l])=>`<option value="${esc(k)}">${esc(l.name)}</option>`).join("")}</select></label>`:""}
       ${isSale?`<label class="f">Due date<input id="s-due" type="date" required value="${old?old.dueDate:""}"></label>`:`<label class="chk" style="align-self:end"><input type="checkbox" id="s-restock" ${!old||old.restock?"checked":""}> Put items back in stock</label>`}
     </div>
     ${!isSale?`<label class="f span">Original delivery (optional)<select id="s-sale">${saleOptions(startDealer,old?old.saleId:"")}</select><span class="hint">Link the return to a DR. Quantities are capped at what was delivered and not yet returned.</span></label>`:""}
     <div class="panel-head" style="margin:18px 0 8px"><h3 style="font-size:15px">Items</h3><span class="small muted" id="cart-count">Tap a product to add it. Tap again to add one more.</span></div>
     <div class="picker">
-      <input id="pick-q" type="search" autocomplete="off" placeholder="Search a product to add (name, code or category)" aria-label="Search products to add">
+      <div class="link-row"><input id="pick-q" type="search" autocomplete="off" placeholder="Search or scan a product to add" aria-label="Search products to add"><button class="btn" type="button" data-scan="#pick-q">Scan</button></div>
       <div class="pick-list" id="pick-list" role="list"></div>
     </div>
     <div class="cart-wrap"><table class="cart-tbl"><thead id="cart-head"></thead><tbody id="cart" aria-live="polite"></tbody><tfoot id="cart-foot"></tfoot></table></div>
@@ -1804,7 +1809,7 @@ function itemsForm(kind,dealerId,editId,opts){
       const max=maxByProduct[pid]; if(max!=null&&(ex?ex.qty:0)>=max){ toast(max?`Only ${max} of ${p.name} can still be returned`:`${p.name} was already fully returned`); return; }
       if(ex) ex.qty+=qty; else { cart.push({productId:pid,name:p.name,qty,price:0,pct:0,cost:Number(p.cost)||0}); refreshLines(); } drawCart(); drawPick(); };
     const drawPick=()=>{ const q=$("#pick-q").value.trim().toLowerCase();
-      const list=prods().filter(([,p])=>!q||[p.name,p.code,p.category].join(" ").toLowerCase().includes(q)).slice(0,60);
+      const list=prods().filter(([,p])=>!q||[p.name,p.code,p.barcode,p.category].join(" ").toLowerCase().includes(q)).slice(0,60);
       $("#pick-list").innerHTML=list.length?`<table><thead><tr><th></th><th>Product</th><th>Code</th><th class="r">Stock</th><th class="r">SRP</th><th></th></tr></thead><tbody>${list.map(([id,p])=>{ const inCart=cart.find(i=>i.productId===id);
         return `<tr class="pick" data-pid="${id}" tabindex="0"><td style="width:40px">${thumb(p,1)}</td><td><b>${esc(p.name)}</b>${p.category?`<div class="small muted">${esc(p.category)}</div>`:""}</td><td class="small muted">${esc(p.code||"—")}</td><td class="r num">${p.stock<=0?`<span class="pill bad">0</span>`:p.stock}</td><td class="r num nowrap">${priceTag(p,pct(),sDate())}</td><td class="r"><span class="pick-add">${inCart?`×${inCart.qty} ＋`:"＋ Add"}</span></td></tr>`; }).join("")}</tbody></table>`:`<p class="small muted" style="margin:8px 12px">No product matches “${esc(q)}”.</p>`; };
     const narrowMQ=window.matchMedia("(max-width:600px)");
@@ -1846,7 +1851,7 @@ function itemsForm(kind,dealerId,editId,opts){
     const setDue=()=>{ if(!isSale||old) return; const d=S.dealers.get($("#s-dealer").value); $("#s-due").value=addDays($("#s-date").value||today(),d?d.terms??30:(S.settings.defaultTerms??30)); };
     $("#pick-list").addEventListener("click",e=>{ const b=e.target.closest("[data-pid]"); if(b) addProduct(b.dataset.pid); });
     $("#pick-q").addEventListener("input",drawPick);
-    $("#pick-q").addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); const b=$("#pick-list [data-pid]"); if(b){ addProduct(b.dataset.pid); $("#pick-q").value=""; drawPick(); } } });
+    $("#pick-q").addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); const v=$("#pick-q").value.trim(), exact=v&&prods().find(([,p])=>p.barcode===v||p.code===v), b=exact?{dataset:{pid:exact[0]}}:$("#pick-list [data-pid]"); if(b){ addProduct(b.dataset.pid); $("#pick-q").value=""; drawPick(); } } });
     $("#cart").addEventListener("click",e=>{ const row=e.target.closest(".cart-row"); if(!row) return; const i=cart[row.dataset.k];
       if(e.target.closest("[data-inc]")){ const max=maxByProduct[i.productId]; if(max!=null&&i.qty>=max){ toast(`Only ${max} can be returned`); return; } i.qty++; drawCart(); drawPick(); }
       else if(e.target.closest("[data-dec]")){ if(i.qty>1) i.qty--; else cart.splice(row.dataset.k,1); drawCart(); drawPick(); }
@@ -1876,7 +1881,7 @@ function itemsForm(kind,dealerId,editId,opts){
       const needApproval=isSale&&!old&&S._hard&&!S.canAdmin;
       if(!isSale&&saleId){ for(const i of cart){ const max=maxByProduct[i.productId]; if(max==null||i.qty>max){ toast(max==null?`${i.name} is not on ${S.txns.get(saleId).no||"that delivery"}`:`Only ${max} of ${i.name} can be returned`); return; } } }
       const data={...(old||{}),type:kind,dealerId:did,date:$("#s-date").value,items:cart.map(i=>({productId:i.productId,name:i.name,qty:i.qty,price:i.price,pct:i.pct,...(i.cost!=null?{cost:r2(i.cost)}:{}),...(i.promo?{promo:true}:{})})),subtotal:T.sub,discountPct:uniPct(),pctDiscount:T.pd,amount:T.total,note:$("#s-note").value.trim()};
-      if(isSale){ data.dueDate=$("#s-due").value; data.discount=T.extra; delete data.saleId; delete data.saleNo; if(opts&&opts.orderId) data.orderId=opts.orderId; }
+      if(isSale){ data.dueDate=$("#s-due").value; data.discount=T.extra; if($("#s-loc",sh)&&$("#s-loc",sh).value) data.locationId=$("#s-loc",sh).value; delete data.saleId; delete data.saleNo; if(opts&&opts.orderId) data.orderId=opts.orderId; }
       else { data.restock=$("#s-restock").checked; data.saleId=saleId||null; data.saleNo=saleId?((S.txns.get(saleId)||{}).no||null):null; }
       { const why=$("#s-why",sh).value.trim(); if(why) data.priceReason=why; else delete data.priceReason; }
       if(isSale&&!allowNegativeStock()){ const pids=Object.entries(diffEffect(old,data)).filter(([pid,dq])=>{ const p=S.products.get(pid); return p&&availableStock(pid,orderId)+dq<0; }); if(pids.length){ const [pid,dq]=pids[0], p=S.products.get(pid); toast(`Only ${Math.max(0,availableStock(pid,orderId))} of ${p.name} available. Add stock or turn on backorders in Store.`); return; } }
@@ -1885,7 +1890,7 @@ function itemsForm(kind,dealerId,editId,opts){
       if(needApproval){ askApproval(data,opts,paidM); return; }
       guarded(btn,async()=>{
         const ref=db.collection("txns").doc(editId||undefined);
-        try{ await ref.set(data); }catch(err){ if(err&&err.code==="credit_hold"&&isSale&&!old&&!S.canAdmin){ btn.disabled=false; askApproval(data,opts,paidM,err.userMsg); return; }
+        try{ await ref.set(data); }catch(err){ if(err&&(err.code==="credit_hold"||err.code==="needs_approval")&&isSale&&!old&&!S.canAdmin){ btn.disabled=false; askApproval(data,opts,paidM,err.userMsg); return; }
           if(err&&err.code==="price_reason"){ btn.disabled=false; $("#s-whywrap",sh).hidden=false; $("#s-why",sh).focus(); toast(err.userMsg,"error"); return; } throw err; }
         // The server changes stock in the same step as the sale (PR-03).
         if(paid&&paid.checked) await db.collection("txns").doc().set({type:"payment",dealerId:did,date:data.date,amount:data.amount,method:$("#s-method").value,ref:"",note:`Paid on release ${data.no}`,no:nextNo("payment"),createdAt:Date.now()+1,createdBy:S.me});
@@ -2046,7 +2051,9 @@ function txSheet(id){
       <section class="panel" style="margin-top:16px"><h2>Void this record</h2><p class="small" style="margin-top:0">Voiding keeps the record for your history but removes it from balances and reports${t.type!=="payment"?", and reverses its stock change":""}.</p>
       <div class="actions"><input id="t-reason" placeholder="Reason, e.g. wrong dealer" style="flex:1;min-width:180px"><button class="btn danger" id="t-void" type="button">Void</button></div></section>`):(S.canWrite?`<div class="notice info"><p>Only the owner or an editor can change this record. Staff can edit or void only what they recorded today.</p><button class="btn sm" data-dealer="${t.dealerId}" type="button">Open dealer</button></div>`:"")}`,sh=>{
     const ed=$("#t-edit",sh); if(ed) ed.addEventListener("click",()=>t.opening?openingForm(null,id):t.type==="payment"?paymentForm(null,id):t.type==="adjustment"?adjustmentForm(null,id):t.type==="writeoff"?writeoffForm(null,id):itemsForm(t.type,null,id));
-    const vd=$("#t-void",sh); if(vd) vd.addEventListener("click",()=>{ if(armed(vd,"Tap again to void")) guarded(vd,async()=>{ const nt={...t,voided:true,voidedAt:Date.now(),voidedBy:S.me,voidReason:$("#t-reason").value.trim()}; await db.doc("txns/"+id).set(nt); toast(`${t.no||"Record"} voided`); }); });
+    const vd=$("#t-void",sh); if(vd) vd.addEventListener("click",()=>{ if(armed(vd,"Tap again to void")) guarded(vd,async()=>{ const why=$("#t-reason").value.trim(), nt={...t,voided:true,voidedAt:Date.now(),voidedBy:S.me,voidReason:why};
+      try{ await db.doc("txns/"+id).set(nt); toast(`${t.no||"Record"} voided`); }
+      catch(err){ if(err&&err.code!=="needs_approval") throw err; if(why.length<3){ toast("Enter a reason, then void again. It goes to the owner for approval.","error"); return; } await window.APP.call("POST","/api/signoffs",{txnId:id,reason:why}); toast("Sent to the owner for approval"); back(); } }); });
     const uv=$("#t-unvoid",sh); if(uv) uv.addEventListener("click",()=>guarded(uv,async()=>{ const nt={...t,voided:false,updated:stamp()}; delete nt.voidedAt; delete nt.voidedBy; delete nt.voidReason; await db.doc("txns/"+id).set(nt); toast("Restored"); }));
     const dl=$("#t-del",sh); if(dl) dl.addEventListener("click",()=>{ if(armed(dl,"Tap again to delete")) guarded(dl,async()=>{ await db.doc("txns/"+id).delete(); toast("Deleted"); back(); }); });
   }]; },true);
@@ -2110,7 +2117,7 @@ function portalPanel(){
 }
 function teamPanel(){
   const me=S.acct||{}, owner=me.role==="owner", list=S.team||[];
-  return window.LedgerOps.storePanels()+portalPanel()+`<section class="panel"><div class="panel-head"><h2>Team accounts</h2>${owner?`<button class="btn sm primary" data-act="new-user" type="button">+ Add person</button>`:""}</div>
+  return window.LedgerOps.storePanels()+window.LedgerOps.passwordPanel(owner)+portalPanel()+`<section class="panel"><div class="panel-head"><h2>Team accounts</h2>${owner?`<button class="btn sm primary" data-act="new-user" type="button">+ Add person</button>`:""}</div>
     ${list.length?`<table><tbody>${list.map(u=>`<tr><td><b>${esc(u.name)}</b>${u.id===me.id?" (you)":""}<div class="small muted">${esc(u.username||"")}</div></td><td><span class="pill ${u.active?(u.role==="dealer"?"good":"neutral"):"bad"}">${u.active?ROLE_L[u.role]:"Disabled"}</span>${u.twoStep?` <span class="pill good">2-step</span>`:""}${u.role==="dealer"&&u.dealerId?`<div class="small muted">${esc((S.dealers.get(u.dealerId)||{}).name||"")}</div>`:""}</td><td class="r">${owner&&u.id!==me.id?`<button class="btn sm" data-act="edit-user" data-id="${esc(u.id)}" type="button">Edit</button>`:""}</td></tr>`).join("")}</tbody></table>`:`<p class="small muted">Loading…</p>`}
     <dl class="kv" style="margin-top:12px"><dt><span class="pill neutral">Staff</span></dt><dd>Record sales, payments, returns and stock. Can edit or void only what they recorded today. Can't change prices, credit limits or settings, or release goods to dealers on hold.</dd>
     <dt><span class="pill neutral">Editor</span></dt><dd>Everything staff can do, plus store settings, credit rules, prices, approving credit holds and editing any record.</dd>
@@ -2124,7 +2131,7 @@ function teamPanel(){
   ${S.canAdmin?`<section class="panel"><div class="panel-head"><h2>Activity log</h2><button class="btn sm" data-act="load-audit" type="button">${S.audit?"Refresh":"Show recent activity"}</button></div>${S.audit?auditTable():`<p class="small muted" style="margin:0">Every sign-in, change and deletion is recorded with who did it and when.</p>`}</section>`:""}`;
 }
 function auditTable(){
-  const lbl={cash_close:"Closed the day",cash_reopen:"Reopened a day",period_close:"Closed the books",period_reopen:"Reopened the books",check_cleared:"Check cleared",check_bounced:"Check bounced",remittance:"Handed in remittance",remittance_approve:"Approved remittance",proof_submit:"Dealer sent proof of payment",proof_approve:"Approved proof of payment",proof_reject:"Rejected proof of payment",goods_received:"Received goods",reminders_run:"Sent reminders",create:"Added",update:"Changed",delete:"Deleted",restore:"Restored",stock:"Stock changed",login:"Signed in",upload:"Photo added",setup:"Created the ledger",password_change:"Changed password",user_create:"Added account",user_update:"Changed account","2fa_enabled":"Turned on two-step sign-in","2fa_disabled":"Turned off two-step sign-in","2fa_recovery_used":"Used a recovery code",signout_others:"Signed out other devices",signout_everywhere:"Signed someone out everywhere",backup_run:"Ran a backup",asset_cleanup:"Removed unused pictures",approval_request:"Asked for approval",approval_approve:"Approved a sale",approval_reject:"Rejected a request",approval_withdraw:"Withdrew a request",view_profile:"Opened a dealer profile",personal_data_export:"Exported personal data",personal_data_anonymise:"Removed personal data",consent_given:"Accepted the privacy notice"};
+  const lbl={merge:"Merged duplicates",supplier_payment:"Paid a supplier",stock_transfer:"Moved stock",void_request:"Asked to void",void_approve:"Approved a void",void_reject:"Refused a void",password_forgot:"Forgot password",password_recover:"Reset password with a recovery code",cash_close:"Closed the day",cash_reopen:"Reopened a day",period_close:"Closed the books",period_reopen:"Reopened the books",check_cleared:"Check cleared",check_bounced:"Check bounced",remittance:"Handed in remittance",remittance_approve:"Approved remittance",proof_submit:"Dealer sent proof of payment",proof_approve:"Approved proof of payment",proof_reject:"Rejected proof of payment",goods_received:"Received goods",reminders_run:"Sent reminders",create:"Added",update:"Changed",delete:"Deleted",restore:"Restored",stock:"Stock changed",login:"Signed in",upload:"Photo added",setup:"Created the ledger",password_change:"Changed password",user_create:"Added account",user_update:"Changed account","2fa_enabled":"Turned on two-step sign-in","2fa_disabled":"Turned off two-step sign-in","2fa_recovery_used":"Used a recovery code",signout_others:"Signed out other devices",signout_everywhere:"Signed someone out everywhere",backup_run:"Ran a backup",asset_cleanup:"Removed unused pictures",approval_request:"Asked for approval",approval_approve:"Approved a sale",approval_reject:"Rejected a request",approval_withdraw:"Withdrew a request",view_profile:"Opened a dealer profile",personal_data_export:"Exported personal data",personal_data_anonymise:"Removed personal data",consent_given:"Accepted the privacy notice"};
   const what=a=>{ let d={}; try{ d=JSON.parse(a.detail||"{}")||{}; }catch(e){}
     if(a.collection==="txns") return `${esc(d.no||"")} ${esc(TYPE_LABEL[d.type]||"")} ${d.amount?P(d.amount):""}${d.voided?" (voided)":""}`;
     if(a.collection==="dealers"||a.collection==="products") return esc(d.name||"");
@@ -2271,7 +2278,7 @@ document.addEventListener("submit",e=>{
   const data={storeName:$("#st-name").value.trim(),phone:$("#st-phone").value.trim(),address:$("#st-addr").value.trim(),paymentInfo:$("#st-pay").value.trim(),defaultTerms:Math.max(0,Math.round(Number($("#st-terms").value)||0)),footer:$("#st-foot").value.trim(),defaultLimit:$("#st-limit").value===""?null:r2($("#st-limit").value),holdDays:Math.max(1,Math.round(Number($("#st-hold").value)||60)),approvalHours:Math.min(336,Math.max(1,Math.round(Number($("#st-apph").value)||24))),blockOverLimit:$("#st-block").checked,allowNegativeStock:$("#st-neg").checked,reminderTemplate:$("#st-msg").value.trim(),privacyNotice:$("#st-privacy").value.trim(),retentionYears:Math.min(30,Math.max(1,Math.round(Number($("#st-ret").value)||10))),discountPct:Math.min(100,Math.max(0,Number($("#st-pct").value)||0)),updated:stamp()};
   guarded(btn,async()=>{ await db.doc("settings/store").set(data); toast("Store details saved"); btn.disabled=false; });
 });
-window.LedgerUI={S,$,$$,esc,P,fmtDate,fmtStamp,today,addDays,status,head,show,back,toast,errMsg,guarded,armed,render,activeDealers,r2,goView,METHODS,saveStore:patch=>db.doc("settings/store").set({...S.settings,...patch})};
+window.LedgerUI={lsGet,lsSet,S,$,$$,esc,P,fmtDate,fmtStamp,today,addDays,status,head,show,back,toast,errMsg,guarded,armed,render,activeDealers,r2,goView,closeAll,METHODS,saveStore:patch=>db.doc("settings/store").set({...S.settings,...patch})};
 const VIEWS=["overview","orders","collect","cash","dealers","products","buying","activity","reports","store"];
 // QR codes carry app deep links: #dealer/<id>, #product/<id>, #receipt/<id>,
 // #statement/<id>, #order/<id>, #aging[ /<dealerId>] and #summary.
@@ -2320,7 +2327,7 @@ fromHash(); render();
   let raf=0; const schedule=()=>{ if(raf) return; raf=requestAnimationFrame(()=>{ raf=0; render(); paintSheet(true); openDeepLink(); }); };
   const done=meta=>{ if(!meta.fromCache&&Object.values(S.loaded).every(Boolean)){ clearTimeout(timer); sync.textContent=offlineText()||(S.canWrite?"Saved · updates live":"View only · updates live"); } };
   window.addEventListener("dcl-offline",()=>{ if(Object.values(S.loaded).every(Boolean)){ clearTimeout(timer); sync.textContent=offlineText()||(S.canWrite?"Saved · updates live":"View only · updates live"); } S._ver++; schedule(); });
-  COLS.forEach(c=>db.collection(c).onSnapshot(snap=>{ const m=new Map(); snap.docs.forEach(d=>m.set(d.id,(norm[c]||(x=>x))(d.data())));
+  COLS.forEach(c=>db.collection(c).onSnapshot(snap=>{ const m=new Map(); snap.docs.forEach(d=>{ const x=d.data(); if(!x.mergedInto) m.set(d.id,(norm[c]||(y=>y))(x)); }); // merged records live on only in history
     if(c==="approvals"&&S.loaded.approvals&&S.canAdmin) m.forEach((r,k)=>{ if(!S.approvals.has(k)&&r.status==="pending"){ const d=S.dealers.get(r.dealerId); toast(`Approval needed: ${d?d.name:"a dealer"} · ${P(r.amount)}`); } });
     if(c==="orders"&&S.loaded.orders) m.forEach((o,k)=>{ if(!S.orders.has(k)&&o.status==="new"){ const d=S.dealers.get(o.dealerId); toast(`New online order ${o.no||""} from ${d?d.name:"a dealer"}`); } }); S[c]=m; S.loaded[c]=true; S._ver++; done(snap.metadata); schedule(); },onErr));
   db.doc("settings/store").onSnapshot(snap=>{ S.settings=snap.exists?{...snap.data()}:{}; S.loaded.settings=true; S._ver++; done(snap.metadata); schedule(); },onErr);

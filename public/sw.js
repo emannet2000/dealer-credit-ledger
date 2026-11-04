@@ -3,7 +3,7 @@
    Ledger data is never cached here: shim.js keeps the collector's data in IndexedDB
    and queues offline payments. Signing out clears this cache. */
 "use strict";
-const SHELL = "dcl-shell-v4";
+const SHELL = "dcl-shell-v5";
 const STATIC = ["/shim.js", "/fonts.js", "/credit.js", "/app.js", "/ops.js", "/app.css", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (e) => {
@@ -50,4 +50,14 @@ self.addEventListener("fetch", (e) => {
       return hit || fresh;
     }));
   }
+});
+
+/* Phone notifications. The message is generic; the app shows the details once opened. */
+self.addEventListener("push", (e) => {
+  let m = {}; try { m = e.data.json(); } catch (err) { /* empty message */ }
+  e.waitUntil(self.registration.showNotification(m.title || "Dealer Credit Ledger", { body: m.body || "", icon: "/icon-192.png", badge: "/icon-192.png", data: { url: m.url || "/" } }));
+});
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: "window" }).then((list) => (list[0] ? list[0].focus() : self.clients.openWindow(e.notification.data.url))));
 });

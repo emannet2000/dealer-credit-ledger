@@ -3,7 +3,7 @@
    (collections, documents, live snapshots, users, photos, downloads). */
 (() => {
   "use strict";
-  const OFFLINE = { code: "offline", message: "You're offline.", userMsg: "You're offline. Only new payments can be recorded without a connection; they sync when you're back online." };
+  const OFFLINE = { code: "offline", message: "You're offline.", userMsg: "You're offline. Only new payments, sales and returns can be recorded without a connection; they sync when you're back online." };
   async function api(method, url, body, headers = {}) {
     const isBlob = typeof Blob !== "undefined" && body instanceof Blob;
     let r;
@@ -149,7 +149,7 @@
           if (e && e.code === "unauthenticated") break;
           if (e && e.status >= 500) break;
           off.queue = off.queue.filter((x) => x !== q);
-          off.held.push({ ...q, error: (e && (e.userMsg || e.message)) || "The server refused this payment.", heldAt: Date.now() });
+          off.held.push({ ...q, error: (e && (e.userMsg || e.message)) || "The server refused this record.", heldAt: Date.now() });
           changed = true;
         }
         await saveQueue();
@@ -180,7 +180,8 @@
         try { await api("PUT", `/api/c/${c}/${encodeURIComponent(id)}`, { data }, opts && opts.restore ? { "X-Restore": "1" } : {}); }
         catch (e) {
           const s = col(c);
-          if (!(e && e.code === "offline" && c === "txns" && data && data.type === "payment" && !s.docs.has(id))) throw e;
+          // Payments, sales and returns can wait for signal. An order release can't, because it also updates the order.
+          if (!(e && e.code === "offline" && c === "txns" && data && ["payment", "sale", "return"].includes(data.type) && !data.orderId && !s.docs.has(id))) throw e;
           await off.ready;
           const m = await me();
           off.queue.push({ id, by: m.id, at: Date.now(), data: { ...data, offline: { key: id, recordedAt: Date.now() } } });
@@ -316,9 +317,14 @@
     logout: async (discard) => {
       await off.ready;
       const unsent = off.queue.length + off.held.length;
-      if (unsent && !discard) throw { code: "unsent", userMsg: `${unsent} payment${unsent === 1 ? " hasn't" : "s haven't"} synced yet. Connect to the internet first, or tap again to sign out and discard ${unsent === 1 ? "it" : "them"}.` };
+      if (unsent && !discard) throw { code: "unsent", userMsg: `${unsent} record${unsent === 1 ? " hasn't" : "s haven't"} synced yet. Connect to the internet first, or tap again to sign out and discard ${unsent === 1 ? "it" : "them"}.` };
       await kv.clear();
-      try { const reg = await navigator.serviceWorker?.getRegistration(); reg?.active?.postMessage("clear"); } catch (e) {}
+      try {
+        const reg = await navigator.serviceWorker?.getRegistration(); reg?.active?.postMessage("clear");
+        // A shared phone stops getting this person's notifications.
+        const sub = await reg?.pushManager?.getSubscription();
+        if (sub) { await api("POST", "/api/push/unsubscribe", { endpoint: sub.endpoint }); await sub.unsubscribe(); }
+      } catch (e) {}
       try { await api("POST", "/api/logout"); } catch (e) {}
       location.href = "/login";
     },

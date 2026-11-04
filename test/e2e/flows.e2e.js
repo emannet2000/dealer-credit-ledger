@@ -192,7 +192,7 @@ test("order from a supplier and receive it from the Buying tab", { skip }, async
   await b.click("[data-act=ops-receive]");
   await b.fill("#g-inv", "INV-1"); await b.fill("#g-amt", "200");
   await b.click("#f button[type=submit]");
-  await b.waitFor("[...document.querySelectorAll('#main h2')].some(h=>h.innerText==='Supplier invoices')");
+  await b.waitFor("[...document.querySelectorAll('#main h2')].some(h=>h.innerText.startsWith('Supplier invoices'))");
   assert.equal(await stock(), before + 5);
   assert.deepEqual(b.errors, []);
 });
