@@ -19,7 +19,7 @@ if (process.env.NODE_ENV === "production" && String(process.env.COOKIE_SECURE) !
 }
 
 const { createApp } = require("./lib/app");
-const { app, close, backupNow, runReminders, dataDir } = createApp({ dataDir: process.env.DATA_DIR || path.join(__dirname, "data") });
+const { app, close, backupNow, runReminders, recordError, dataDir } = createApp({ dataDir: process.env.DATA_DIR || path.join(__dirname, "data") });
 const port = Number(process.env.PORT) || 3000;
 
 const server = app.listen(port, () => {
@@ -38,6 +38,11 @@ const remind = () => {
   if (hour >= 9 && hour < 18) runReminders().catch((e) => console.error("Reminders failed:", e.message));
 };
 const hourly = setInterval(remind, 3600e3);
+
+// Log and report anything unexpected, then stop so the process manager restarts a clean copy.
+const crashed = (e) => { console.error(e); try { recordError(`Crash: ${(e && e.message) || e}`); } catch (err) { /* already failing */ } setTimeout(() => process.exit(1), 1000); };
+process.on("uncaughtException", crashed);
+process.on("unhandledRejection", crashed);
 
 function shutdown() {
   clearTimeout(first); clearInterval(daily); clearInterval(hourly);
