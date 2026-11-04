@@ -1,11 +1,25 @@
 "use strict";
 // Small headless-Chrome driver over the DevTools protocol (no extra dependencies).
-// Used by test/e2e/*.e2e.js; needs CHROME_PATH pointing to Chrome or Chromium.
+// Used by test/e2e/*.e2e.js. Finds Chrome by itself, or set CHROME_PATH.
 const fs = require("fs"), os = require("os"), path = require("path"), { spawn } = require("child_process");
 const { createApp } = require("../../lib/app");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const day = (o) => { const d = new Date(); d.setDate(d.getDate() + o); return d.toISOString().slice(0, 10); };
+
+// CHROME_PATH, then the usual install locations, then a copy downloaded by Puppeteer.
+function findChrome() {
+  if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
+  const usual = ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"].find((f) => fs.existsSync(f));
+  if (usual) return usual;
+  const root = path.join(os.homedir(), ".cache", "puppeteer", "chrome");
+  if (!fs.existsSync(root)) return null;
+  for (const v of fs.readdirSync(root).sort().reverse()) {
+    const f = path.join(root, v, "chrome-linux64", "chrome");
+    if (fs.existsSync(f)) return f;
+  }
+  return null;
+}
 
 async function startApp() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ledger-e2e-"));
@@ -27,7 +41,7 @@ async function startApp() {
 }
 
 async function startBrowser() {
-  const CHROME = process.env.CHROME_PATH;
+  const CHROME = findChrome();
   const port = 9300 + Math.floor(Math.random() * 600);
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "ledger-chrome-"));
   const ch = spawn(CHROME, ["--headless=new", `--remote-debugging-port=${port}`, "--no-sandbox", "--no-first-run", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
@@ -54,4 +68,4 @@ async function startBrowser() {
   return b;
 }
 
-module.exports = { startApp, startBrowser, sleep, day };
+module.exports = { startApp, startBrowser, findChrome, sleep, day };

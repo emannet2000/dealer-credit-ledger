@@ -10,7 +10,7 @@
 <title>Dealer Credit Ledger</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Public+Sans:wght@400;500;600;700&display=swap">
+<script src="/fonts.js" data-href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Public+Sans:wght@400;500;600;700&display=swap"></script>
 <style>
 /* Layout: sticky header with tabs, one working column (max 1180px); records and forms open in a stacked side sheet. */
 :root{
@@ -58,6 +58,10 @@ main{padding-block:20px 60px}
 .notice.info{background:var(--accent-soft)}
 .notice.warn{background:var(--warn-soft)}
 .notice.bad{background:var(--bad-soft)}
+.dup-slot:empty{display:none}
+.dup-box{display:block;margin:0}
+.dup-box p{margin:0}
+.dup-row{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:8px 0 0}
 .notice p{margin:0;flex:1;min-width:200px}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:20px}
 .kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;min-width:0}
@@ -190,6 +194,22 @@ label.f,div.f{display:flex;flex-direction:column;gap:4px;font-size:13px;font-wei
 .rc-sign div{flex:1;min-width:160px;font-size:12px;color:#555;text-align:center}
 .rc-sign span{display:block;border-top:1px solid #111;margin-bottom:4px;height:28px}
 .rc-foot{font-size:12px;color:#555;text-align:center;margin:20px 0 0}
+.qr-block{display:flex;gap:14px;align-items:center;margin:18px 0 0;padding-top:14px;border-top:1px solid #ddd}
+.qr-block .qr-img{width:104px;height:104px;flex:none;border:1px solid #ddd;border-radius:8px;background:#fff;padding:6px}
+.qr-block .qr-text{min-width:0;font-size:12px;color:#444}
+.qr-block .qr-text b{display:block;font-size:13px;color:#111}
+.qr-block .qr-link{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px;color:#777;word-break:break-all;margin-top:3px}
+.qr-big{text-align:center;margin:8px 0 12px}
+.qr-big img{width:min(420px,100%);height:auto;border:1px solid #ddd;border-radius:12px;background:#fff;padding:10px}
+.qr-name{text-align:center;font-size:20px;margin:4px 0}
+.qr-detail{text-align:center;color:#555;margin:4px 0 12px}
+.qr-scan{text-align:center;margin:10px 0 4px}
+.qr-url{text-align:center;color:#777;word-break:break-all}
+.qr-label .rc-head{margin-bottom:8px}
+@media (max-width:520px){
+  .qr-block{align-items:flex-start}
+  .qr-block .qr-img{width:88px;height:88px}
+}
 @media print{
   body{background:#fff!important}
   body::before,header,main,.no-print,.toast{display:none!important}
@@ -295,6 +315,12 @@ body.scrolled header{box-shadow:0 4px 18px rgba(0,0,0,.07)}
 .promo-box{border:1px dashed var(--line);border-radius:var(--r);padding:12px 14px;background:var(--surface)}
 .form-sec{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:10px 0 -4px;border-top:1px solid var(--line);padding-top:12px}
 .form-sec:first-child{border-top:0;padding-top:0;margin-top:0}
+.name-block{display:flex;flex-direction:column;gap:6px}
+.name-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+@media (max-width:560px){.name-fields{grid-template-columns:minmax(0,1fr)}}
+.name-preview{color:var(--fg);font-weight:600}
+.form-grid input:not([type=checkbox]):not([type=radio]):not([type=file]),.form-grid select{min-height:40px;box-sizing:border-box}
+.req{color:var(--bad);margin-left:2px}
 .crm-log{list-style:none;margin:12px 0 0;padding:0}
 .crm-log li{position:relative;border-top:1px solid var(--line);padding:10px 0}
 .crm-log .crm-fu{margin-top:6px}
@@ -529,6 +555,47 @@ function statusPill(st,d){
 const samplePill=x=>x&&x.sample?` <span class="pill sample">Example</span>`:"";
 const imgUrl=id=>"/_blob/"+encodeURIComponent(id);
 const thumb=(p,sm)=>p&&p.imageId?`<img class="thumb${sm?" sm":""}" src="${imgUrl(p.imageId)}" alt="" loading="lazy">`:`<span class="thumb ph${sm?" sm":""}" aria-hidden="true">No photo</span>`;
+/* ---------- QR codes and deep links ---------- */
+function appOrigin(){ try{ return location.origin&&location.origin!=="null"?location.origin:location.protocol+"//"+location.host; }catch(e){ return ""; } }
+const deepLink=(kind,id)=>`${appOrigin()}/#${kind}${id?"/"+encodeURIComponent(id):""}`;
+const qrUrl=(text,size)=>`/api/qr?data=${encodeURIComponent(String(text))}&size=${Math.max(96,Math.min(600,Math.round(Number(size)||240)))}`;
+const qrReady=()=>!!window.APP&&(typeof navigator==="undefined"||navigator.onLine!==false);
+function qrBlock(text,title,sub,cls=""){
+  if(!qrReady()) return "";
+  return `<div class="qr-block${cls?" "+cls:""}"><img class="qr-img" src="${esc(qrUrl(text,190))}" alt="${esc(title)} QR code" width="190" height="190"><div class="qr-text"><b>${esc(title)}</b>${sub?`<div class="small">${esc(sub)}</div>`:""}<div class="qr-link">${esc(String(text).replace(/^https?:\/\//,""))}</div><div class="small muted">Scan with a phone camera to open it in this ledger.</div></div></div>`;
+}
+function qrSheet({title,sub,text,line,detail}){
+  const label=line||title;
+  show(()=>[`<div class="no-print">${head(title,sub)}<div class="actions" style="margin-bottom:14px"><button class="btn primary" type="button" id="qr-print">Print label</button>${downloads?`<button class="btn" type="button" id="qr-dl">Download PNG</button>`:""}<button class="btn" type="button" id="qr-copy">Copy link</button></div></div>
+    <article class="receipt qr-label">
+      ${storeHead("QR CODE",[esc(title)])}
+      <div class="qr-big"><img src="${esc(qrUrl(text,420))}" alt="${esc(label)} QR code" width="420" height="420"></div>
+      <h2 class="qr-name">${esc(label)}</h2>
+      ${detail?`<div class="qr-detail">${detail}</div>`:""}
+      <p class="small qr-scan">Scan with a phone camera to open this in the ledger.</p>
+      <p class="qr-url small">${esc(text)}</p>
+    </article>`,sh=>{
+    $("#qr-print",sh).addEventListener("click",()=>window.print());
+    $("#qr-copy",sh).addEventListener("click",()=>copyText(text,title));
+    const dl=$("#qr-dl",sh); if(dl) dl.addEventListener("click",()=>guarded(dl,async()=>{
+      const r=await fetch(qrUrl(text,600),{credentials:"same-origin"});
+      if(!r.ok) throw new Error("qr_download_failed");
+      await save(`${String(label).replace(/[^\w.-]+/g,"_").slice(0,60)||"qr-code"}-qr.png`,await r.blob());
+      dl.disabled=false;
+    }));
+  }],true);
+}
+function dealerQr(id){
+  const d=S.dealers.get(id); if(!d) return toast("That dealer isn't in this ledger.","error");
+  const st=status(id);
+  qrSheet({title:"Dealer QR code",sub:d.name,line:d.name,text:deepLink("dealer",id),
+    detail:[d.phone?esc(d.phone):"",d.area?esc(d.area):"",`Balance ${P(st.balance)}`].filter(Boolean).join(" · ")});
+}
+function productQr(id){
+  const p=S.products.get(id); if(!p) return toast("That product isn't in this ledger.","error");
+  qrSheet({title:"Product QR code",sub:p.name,line:p.name,text:deepLink("product",id),
+    detail:[p.code?`Code ${esc(p.code)}`:"",p.category?esc(p.category):"",P(p.dealerPrice)].filter(Boolean).join(" · ")});
+}
 const activeDealers=()=>[...S.dealers.entries()].filter(([,d])=>d.active!==false&&stageOf(d)!=="lost").sort((a,b)=>a[1].name.localeCompare(b[1].name));
 const activeProducts=()=>[...S.products.entries()].filter(([,p])=>p.active!==false).sort((a,b)=>a[1].name.localeCompare(b[1].name));
 async function shrinkImage(file){
@@ -691,6 +758,7 @@ function ownerSummarySheet(){
           ${D.staff.length?D.staff.map(s=>`<tr><td>${esc(s.name)}</td><td class="r num">${s.count}</td><td class="r num">${P(s.amount)}</td></tr>`).join(""):`<tr><td colspan="3" class="muted">No payments in this period.</td></tr>`}</tbody></table>
         <table class="rc-tbl"><thead><tr><th>Largest overdue balances</th><th class="r">Overdue</th><th class="r">Balance</th></tr></thead><tbody>
           ${top.length?top.map(r=>`<tr><td>${esc(r.d.name)}</td><td class="r num">${P(r.total-r.b.current)}</td><td class="r num">${P(r.balance)}</td></tr>`).join(""):`<tr><td colspan="3" class="muted">Nothing overdue.</td></tr>`}</tbody></table>
+        ${qrBlock(deepLink("summary"),"Owner summary",`${fmtDate(D.from)} – ${fmtDate(D.to)}`)}
       </article>`,sh=>{ const pr=$("#os-print",sh); if(pr) pr.addEventListener("click",()=>window.print()); }]; });
 }
 /* ================= main views ================= */
@@ -807,7 +875,7 @@ function vProducts(){
     ${rows.length?`<div class="tbl-wrap"><table><thead><tr><th>Product</th><th>Code</th><th class="r">Dealer price</th><th class="r">SRP</th><th class="r">Cost</th><th class="r">Profit/pc</th><th class="r">Stock</th></tr></thead><tbody>
     ${rows.map(([id,p])=>{ const low=p.reorderLevel!=null&&p.stock<=p.reorderLevel; const profit=p.cost!=null?r2(p.dealerPrice-p.cost):null; const mp=profit!=null&&p.dealerPrice?Math.round(profit/p.dealerPrice*100):null;
       return `<tr class="${S.canWrite?"click":""}" ${S.canWrite?`tabindex="0" data-product="${id}"`:""}><td><div class="prod-cell">${thumb(p)}<div><b>${esc(p.name)}</b>${samplePill(p)}${p.active===false?` <span class="pill neutral">Archived</span>`:""}<div class="small muted">${esc(p.category||"")}${p.imageLink&&!p.imageId?`${p.category?" · ":""}<a href="${esc(p.imageLink)}" target="_blank" rel="noopener noreferrer">View picture ↗</a>`:""}</div></div></div></td>
-      <td class="small muted">${esc(p.code||"—")}</td><td class="r num">${P(p.dealerPrice)}</td><td class="r num nowrap">${p.srp||promoOn(p)?priceTag(p,1):"—"}</td><td class="r num small">${p.cost!=null?P(p.cost):"—"}</td><td class="r num small">${profit!=null?`${P(profit)}${mp!=null?`<div class="muted">${mp}%</div>`:""}`:"—"}</td><td class="r num">${low?`<span class="pill ${p.stock<=0?"bad":"warn"}">${p.stock}</span>`:p.stock}</td></tr>`;}).join("")}
+      <td class="small muted">${esc(p.code||"—")}${qrReady()?` <button class="btn sm" type="button" data-act="product-qr" data-id="${id}" aria-label="QR code for ${esc(p.name)}">QR</button>`:""}</td><td class="r num">${P(p.dealerPrice)}</td><td class="r num nowrap">${p.srp||promoOn(p)?priceTag(p,1):"—"}</td><td class="r num small">${p.cost!=null?P(p.cost):"—"}</td><td class="r num small">${profit!=null?`${P(profit)}${mp!=null?`<div class="muted">${mp}%</div>`:""}`:"—"}</td><td class="r num">${low?`<span class="pill ${p.stock<=0?"bad":"warn"}">${p.stock}</span>`:p.stock}</td></tr>`;}).join("")}
     </tbody></table></div>`:`<div class="empty"><h3>${S.products.size?"No match":"No products yet"}</h3><p>${S.products.size?"Try another search or category.":"Add the items you release to dealers, with dealer price and stock on hand."}</p></div>`}
   </section>`;
 }
@@ -1170,6 +1238,7 @@ function receiptSheet(id){
       ${t.note&&t.note!=="Opening balance"?`<p class="small">Note: ${esc(t.note)}</p>`:""}
       ${t.manualPrice&&S.canWrite?`<p class="small no-print">Manual price${t.priceReason?`: ${esc(t.priceReason)}`:" set by the owner or an editor"}.</p>`:""}
       ${t.type==="sale"&&s.paymentInfo?`<p class="small"><b>How to pay:</b> ${esc(s.paymentInfo)}</p>`:""}
+      ${qrBlock(deepLink("receipt",id),"Scan this receipt",`${t.no?t.no+" · ":""}${d.name}`)}
       <div class="rc-sign">${t.type==="payment"?`<div><span></span>Received by (store)</div>`:`<div><span></span>Released by</div><div><span></span>Received by (dealer)</div>`}</div>
       <p class="rc-foot">This is not an official receipt. ${esc(s.footer??"Salamat po!")}</p>
     </article>`,sh=>{
@@ -1477,6 +1546,84 @@ const KIND_L={call:"Call",visit:"Visit",message:"Message",meeting:"Meeting",note
 const stageOf=d=>(d&&d.stage)||"dealer";
 const isProspect=d=>["lead","contacted","interested"].includes(stageOf(d));
 const stagePill=d=>`<span class="pill ${STAGE_C[stageOf(d)]}">${STAGE_L[stageOf(d)]}</span>`;
+// Personal details: names are kept as parts and joined into the display name.
+const GENDERS=[["","Not specified"],["female","Female"],["male","Male"],["other","Other"],["prefer not to say","Prefer not to say"]];
+const GENDER_L=Object.fromEntries(GENDERS);
+function splitName(name){
+  const p=String(name||"").trim().split(/\s+/).filter(Boolean);
+  if(!p.length) return {first:"",middle:"",last:""};
+  if(p.length===1) return {first:p[0],middle:"",last:""};
+  // Keep Filipino family names such as “Dela Cruz” together.
+  const particles=new Set(["de","del","dela","delas","delos","di","da","das","do","dos","du","la","las","lo","los","van","von","der","den","san","santa","santo","sto","stos"]);
+  let cut=p.length-1;
+  for(let i=1;i<p.length-1;i++){ if(particles.has(p[i].toLowerCase().replace(/\.$/,""))){ cut=i; break; } }
+  return {first:p[0],middle:p.slice(1,cut).join(" "),last:p.slice(cut).join(" ")};
+}
+function nameParts(d){
+  if(d&&(d.firstName||d.middleName||d.lastName)) return {first:String(d.firstName||"").trim(),middle:String(d.middleName||"").trim(),last:String(d.lastName||"").trim()};
+  return splitName(d&&d.name);
+}
+const fullName=(first,middle,last)=>[first,middle,last].map(x=>String(x||"").trim().replace(/\s+/g," ")).filter(Boolean).join(" ");
+// Duplicate checks for the dealer and product forms. Text ignores case, accents and punctuation.
+function normText(s){ return String(s??"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim(); }
+// The last 10 digits, so 0917 123 4567 and +63 917 123 4567 are the same number.
+function phoneKey(v){ const d=String(v??"").replace(/\D/g,"").slice(-10); return d.length>=7?d:""; }
+function sameWords(a,b){ return [...new Set(a)].sort().join(" ")===[...new Set(b)].sort().join(" "); }
+// True when two texts differ by one typo: a changed, added, missing or swapped character.
+function oneEditApart(a,b){
+  if(a===b) return true;
+  if(Math.abs(a.length-b.length)>1) return false;
+  let i=0; while(i<a.length&&a[i]===b[i]) i++;
+  if(a.length===b.length) return a.slice(i+1)===b.slice(i+1)||(a[i]===b[i+1]&&a[i+1]===b[i]&&a.slice(i+2)===b.slice(i+2));
+  const [short,long]=a.length<b.length?[a,b]:[b,a];
+  return short.slice(i)===long.slice(i+1);
+}
+// Numbers must agree, so “Liquid 1L” and “Liquid 2L” are different products, not a typo.
+function nearText(a,b){ return a.length>=8&&b.length>=8&&a.replace(/\D/g,"")===b.replace(/\D/g,"")&&oneEditApart(a,b); }
+function rankMatches(out){ return out.sort((a,b)=>b.strong-a.strong||(a.item.active===false)-(b.item.active===false)||String(a.item.name).localeCompare(String(b.item.name))); }
+// Records that look like the one being entered. “Strong” means the same mobile, email, code or name.
+function findDealerMatches(dealers,form,exceptId){
+  const n=normText(form.name), words=n?n.split(" "):[], ph=phoneKey(form.phone), em=String(form.email||"").trim().toLowerCase(), out=[];
+  for(const [id,d] of dealers){
+    if(id===exceptId||d.anonymised) continue;
+    const m=normText(d.name), w=m?m.split(" "):[], why=[];
+    if(ph&&phoneKey(d.phone)===ph) why.push({slot:"contact",strong:true,what:"mobile number"});
+    if(em&&String(d.email||"").trim().toLowerCase()===em) why.push({slot:"contact",strong:true,what:"email"});
+    if(n&&m){
+      if(sameWords(words,w)) why.push({slot:"name",strong:true,what:"name"});
+      else if(words.length>1&&w.length>1&&((words[0]===w[0]&&words.at(-1)===w.at(-1))||nearText(n,m))) why.push({slot:"name",strong:false,what:"name"});
+    }
+    if(why.length) out.push({id,item:d,why,strong:why.some(x=>x.strong)});
+  }
+  return rankMatches(out);
+}
+// “1 L” and “1L” count as the same size.
+function productWords(s){ const t=normText(s).replace(/(\d)\s+(?=[a-z])/g,"$1"); return t?t.split(" "):[]; }
+function findProductMatches(products,form,exceptId){
+  const words=productWords(form.name), n=words.join(" "), code=normText(form.code).replace(/ /g,""), out=[];
+  for(const [id,p] of products){
+    if(id===exceptId) continue;
+    const w=productWords(p.name), m=w.join(" "), why=[];
+    if(code&&normText(p.code).replace(/ /g,"")===code) why.push({slot:"product",strong:true,what:"code"});
+    if(n&&m){
+      const [short,long]=words.length<=w.length?[words,w]:[w,words];
+      if(sameWords(words,w)) why.push({slot:"product",strong:true,what:"name"});
+      else if((short.length>=2&&short.every(x=>long.includes(x)))||nearText(n,m)) why.push({slot:"product",strong:false,what:"name"});
+    }
+    if(why.length) out.push({id,item:p,why,strong:why.some(x=>x.strong)});
+  }
+  return rankMatches(out);
+}
+// The “already in your list” box. detail(match) gives the line that helps tell records apart.
+function dupPanel(matches,slot,detail){
+  const rows=matches.filter(m=>m.why.some(y=>y.slot===slot));
+  if(!rows.length) return "";
+  const strong=rows.some(m=>m.why.some(y=>y.slot===slot&&y.strong));
+  return `<div class="notice ${strong?"bad":"warn"} dup-box"><p class="small"><b>${strong?"Already in your list":"Is this the same as…"}</b></p>
+    ${rows.slice(0,3).map(m=>{ const why=m.why.filter(y=>y.slot===slot).map(y=>`${y.strong?"Same":"Similar"} ${y.what}`).join(", ");
+      return `<div class="dup-row"><div><b>${esc(m.item.name)}</b>${m.item.active===false?` <span class="pill neutral">Archived</span>`:""}<div class="small muted">${esc(why)}${detail(m)?" · "+esc(detail(m)):""}</div></div><button class="btn sm" type="button" data-dup-open="${esc(m.id)}">Open</button></div>`; }).join("")}
+    ${rows.length>3?`<p class="small muted">and ${rows.length-3} more</p>`:""}</div>`;
+}
 const CRM_CACHE={key:null,map:new Map()};
 function crmInfo(id){
   if(CRM_CACHE.key!==S._ver){ CRM_CACHE.key=S._ver; CRM_CACHE.map=new Map();
@@ -1503,7 +1650,7 @@ function crmPanel(id){
     <div class="panel-head"><h2>Contact log</h2><div class="actions">${contactLinks(d)}${S.canWrite?`<button class="btn sm primary" data-act="log-contact" data-id="${id}" type="button">+ Log contact</button>`:""}</div></div>
     <dl class="kv">
       <dt>Stage</dt><dd>${S.canWrite?`<select id="crm-stage" data-id="${id}" aria-label="Change stage" style="width:auto;min-width:10em">${STAGES.map(s=>`<option value="${s}" ${s===stageOf(d)?"selected":""}>${STAGE_L[s]}</option>`).join("")}</select>`:stagePill(d)}</dd>
-      ${d.email?`<dt>Email</dt><dd>${esc(d.email)}</dd>`:""}${d.address?`<dt>Address</dt><dd>${esc(d.address)}</dd>`:""}${d.birthday?`<dt>Birthday</dt><dd>${fmtDate(d.birthday)}</dd>`:""}
+      ${d.email?`<dt>Email</dt><dd>${esc(d.email)}</dd>`:""}${d.address?`<dt>Address</dt><dd>${esc(d.address)}</dd>`:""}${d.age!=null?`<dt>Age</dt><dd>${esc(d.age)}</dd>`:""}${d.gender?`<dt>Gender</dt><dd>${esc(GENDER_L[String(d.gender).toLowerCase()]||d.gender)}</dd>`:""}${d.birthday?`<dt>Birthday</dt><dd>${fmtDate(d.birthday)}</dd>`:""}
       ${d.source||d.referredBy?`<dt>Source</dt><dd>${esc([d.source,d.referredBy&&"referred by "+d.referredBy].filter(Boolean).join(" · "))}</dd>`:""}
       ${(d.tags||[]).length?`<dt>Tags</dt><dd>${d.tags.map(t=>`<span class="pill neutral">${esc(t)}</span>`).join(" ")}</dd>`:""}
       <dt>Last contact</dt><dd>${c.last?fmtDate(c.last):"Never"}</dd>
@@ -1594,22 +1741,34 @@ function cropPicture(box,src){
 }
 const avatar=(d,size)=>d&&d.photoId?`<img class="avatar" src="${imgUrl(d.photoId)}" alt="" width="${size||40}" height="${size||40}" loading="lazy">`:`<span class="avatar ph" style="width:${size||40}px;height:${size||40}px;font-size:${Math.round((size||40)*0.4)}px" aria-hidden="true">${esc(((d&&d.name)||"?").trim().split(/\s+/).slice(0,2).map(w=>w[0]).join("").toUpperCase())}</span>`;
 function dealerForm(id,preStage){
-  show(()=>{ const d=id?S.dealers.get(id):{name:"",phone:"",area:"",creditLimit:S.settings.defaultLimit??"",terms:S.settings.defaultTerms??30,notes:"",stage:preStage||"dealer"}; const hasTx=id&&dealerTxns(id,true).length;
-  const stg=stageOf(d), prospect=isProspect(d);
+  show(()=>{ const d=id?S.dealers.get(id):{name:"",firstName:"",middleName:"",lastName:"",age:"",gender:"",phone:"",area:"",address:"",creditLimit:S.settings.defaultLimit??"",terms:S.settings.defaultTerms??30,notes:"",stage:preStage||"dealer"}; const hasTx=id&&dealerTxns(id,true).length;
+  const stg=stageOf(d), prospect=isProspect(d), nm=nameParts(d);
   return [head(id?"Edit "+(prospect?"prospect":"dealer"):(prospect?"New prospect":"New dealer"),id?"":"Contact details, where they came from and their credit terms.")+`<form id="f" class="form-grid">
-    <h3 class="span form-sec">Contact</h3>
-    ${assets?`<div class="f span"><span>Photo</span><div class="photo-row"><div id="d-prev">${avatar(d,88)}</div>
+    <h3 class="span form-sec">Personal details</h3>
+    ${assets?`<div class="f span"><span>Photo</span><div class="photo-row"><div id="d-prev">${avatar({...d,name:fullName(nm.first,nm.middle,nm.last)},88)}</div>
       <div class="actions"><label class="btn sm" for="d-file" style="cursor:pointer">${d.photoId?"Change photo":"Add photo"}</label><input id="d-file" type="file" accept="image/*" hidden>
         <label class="btn sm" for="d-cam" style="cursor:pointer">Take photo</label><input id="d-cam" type="file" accept="image/*" capture="user" hidden>
         <button class="btn sm" type="button" id="d-recrop" ${d.photoId?"":"hidden"}>Adjust crop</button><button class="btn sm" type="button" id="d-rmphoto" ${d.photoId?"":"hidden"}>Remove</button></div></div>
       <span class="hint">You can also paste a picture (Ctrl+V). You choose which part to keep.</span><div id="d-cropper" class="cropper" hidden></div></div>`:""}
-    <label class="f span">Full name<input id="d-name" required maxlength="120" value="${esc(d.name)}" placeholder="e.g. Juana Dela Cruz"></label>
-    <label class="f">Mobile number<input id="d-phone" inputmode="tel" value="${esc(d.phone)}" placeholder="0917 123 4567"></label>
-    <label class="f">Email<input id="d-email" type="email" value="${esc(d.email||"")}" placeholder="name@example.com"></label>
+    <div class="span name-block">
+      <div class="name-fields">
+        <label class="f"><span>First name<span class="req" aria-hidden="true">*</span></span><input id="d-first" required maxlength="60" autocomplete="given-name" autocapitalize="words" value="${esc(nm.first)}" placeholder="e.g. Juana"></label>
+        <label class="f">Middle name<input id="d-middle" maxlength="60" autocomplete="additional-name" autocapitalize="words" value="${esc(nm.middle)}" placeholder="e.g. Santos"></label>
+        <label class="f"><span>Last name<span class="req" aria-hidden="true">*</span></span><input id="d-last" required maxlength="60" autocomplete="family-name" autocapitalize="words" value="${esc(nm.last)}" placeholder="e.g. Dela Cruz"></label>
+      </div>
+      <span class="hint">Saved as <b class="name-preview" id="d-name-prev">${esc(fullName(nm.first,nm.middle,nm.last)||"—")}</b></span>
+      <div class="dup-slot" id="d-dup-name" role="status" aria-live="polite"></div>
+    </div>
+    <label class="f">Age<input id="d-age" type="number" inputmode="numeric" min="0" max="120" step="1" value="${esc(d.age??"")}" placeholder="e.g. 34"><span class="hint">Optional. 0–120.</span></label>
+    <label class="f">Gender<select id="d-gender">${GENDERS.map(([v,l])=>`<option value="${v}" ${String(d.gender||"").toLowerCase()===v?"selected":""}>${l}</option>`).join("")}</select></label>
+    <label class="f">Birthday<input id="d-bday" type="date" value="${esc(d.birthday||"")}" autocomplete="bday"><span class="hint">Optional.</span></label>
+    <label class="f span">Full address<textarea id="d-addr" rows="2" maxlength="300" autocomplete="street-address" placeholder="House no., street, barangay, city">${esc(d.address||"")}</textarea></label>
+    <h3 class="span form-sec">Contact</h3>
+    <label class="f">Mobile number<input id="d-phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="40" value="${esc(d.phone)}" placeholder="0917 123 4567"></label>
+    <label class="f">Email<input id="d-email" type="email" autocomplete="email" maxlength="120" value="${esc(d.email||"")}" placeholder="name@example.com"></label>
+    <div class="span dup-slot" id="d-dup-contact" role="status" aria-live="polite"></div>
     <label class="f">Messenger / Facebook link<input id="d-msgr" type="url" value="${esc(d.messenger||"")}" placeholder="https://m.me/username"></label>
-    <label class="f">Birthday<input id="d-bday" type="date" value="${esc(d.birthday||"")}"></label>
-    <label class="f">Area / barangay<input id="d-area" value="${esc(d.area)}" placeholder="e.g. Brgy. San Isidro, QC"></label>
-    <label class="f">Full address<input id="d-addr" value="${esc(d.address||"")}" placeholder="House no., street, city"></label>
+    <label class="f">Area / barangay<input id="d-area" autocomplete="address-level3" maxlength="120" value="${esc(d.area)}" placeholder="e.g. Brgy. San Isidro, QC"></label>
     <h3 class="span form-sec">Relationship</h3>
     <label class="f">Stage<select id="d-stage">${STAGES.map(s=>`<option value="${s}" ${s===stg?"selected":""}>${STAGE_L[s]}</option>`).join("")}</select><span class="hint">Prospects become dealers automatically on their first credit sale.</span></label>
     <label class="f">Source<select id="d-src"><option value="">—</option>${SOURCES.map(s=>`<option ${s===d.source?"selected":""}>${s}</option>`).join("")}</select></label>
@@ -1627,15 +1786,18 @@ function dealerForm(id,preStage){
     <label class="f">Date they took those goods<input id="d-obdate" type="date" value="${today()}"></label>`}
     ${id?"":`<label class="f">First follow-up<input id="d-fu" type="date" min="${today()}" value="${prospect?addDays(today(),3):""}"><span class="hint">Adds a reminder to the Follow-ups list.</span></label>`}
     <label class="f span">Notes<textarea id="d-notes" placeholder="Collection day, ID on file…">${esc(d.notes)}</textarea></label>
-    <p class="err span" id="d-err" style="color:var(--bad);margin:0"></p>
+    <p class="err span" id="d-err" role="alert" aria-live="polite" style="color:var(--bad);margin:0"></p>
     <div class="actions span"><button class="btn primary" type="submit">${id?"Save changes":prospect?"Add prospect":"Add dealer"}</button><button class="btn" type="button" data-back>Cancel</button>
     ${id?(hasTx?`<button class="btn" type="button" id="d-arch" style="margin-left:auto">${d.active===false?"Restore dealer":"Archive dealer"}</button>`:`<button class="btn danger" type="button" id="d-del" style="margin-left:auto">Delete ${prospect?"prospect":"dealer"}</button>`):""}</div></form>`,sh=>{
     // Dealer photo: pick, take or paste a picture, then crop it in place.
     let photoBlob=null, photoRemoved=false;
     const cur=id?S.dealers.get(id):null;
-    const showPrev=()=>{ const el=$("#d-prev",sh); if(!el) return; const has=photoBlob||(!photoRemoved&&cur&&cur.photoId);
-      el.innerHTML=photoBlob?`<img class="avatar" src="${URL.createObjectURL(photoBlob)}" alt="New photo" width="88" height="88">`:avatar(photoRemoved?{name:$("#d-name",sh).value}:cur||{name:$("#d-name",sh).value},88);
-      $("#d-recrop",sh).hidden=!has; $("#d-rmphoto",sh).hidden=!has; };
+    const liveName=()=>fullName($("#d-first",sh)?.value,$("#d-middle",sh)?.value,$("#d-last",sh)?.value);
+    const showPrev=()=>{ const el=$("#d-prev",sh); if(!el) return;
+      const preview={...(cur||{}),name:liveName()||(cur&&cur.name)||""}; if(photoRemoved) delete preview.photoId;
+      el.innerHTML=photoBlob?`<img class="avatar" src="${URL.createObjectURL(photoBlob)}" alt="New photo" width="88" height="88">`:avatar(preview,88);
+      const has=photoBlob||(!photoRemoved&&cur&&cur.photoId), rc=$("#d-recrop",sh), rm=$("#d-rmphoto",sh);
+      if(rc) rc.hidden=!has; if(rm) rm.hidden=!has; };
     const crop=async src=>{ const b=await cropPicture($("#d-cropper",sh),src); if(b){ photoBlob=b; photoRemoved=false; showPrev(); } };
     const pick=f=>{ if(!f) return; if(!f.type.startsWith("image/")){ toast("Choose a picture file"); return; } crop(URL.createObjectURL(f)); };
     if($("#d-file",sh)){
@@ -1644,16 +1806,32 @@ function dealerForm(id,preStage){
       $("#d-rmphoto",sh).addEventListener("click",()=>{ photoBlob=null; photoRemoved=true; showPrev(); });
       sh.addEventListener("paste",e=>{ const it=[...(e.clipboardData?.items||[])].find(i=>i.type.startsWith("image/")); if(it){ e.preventDefault(); pick(it.getAsFile()); } });
     }
+    const updName=()=>{ const n=liveName(), p=$("#d-name-prev",sh); if(p) p.textContent=n||"—"; showPrev(); };
+    ["d-first","d-middle","d-last"].forEach(k=>{ const el=$("#"+k,sh); if(el) el.addEventListener("input",updName); });
+    // Look for this dealer as the form is filled in. An edit only checks what changed.
+    const fresh=(v,old)=>cur&&normText(v)===normText(old)?"":v;
+    const dealerDups=()=>findDealerMatches(S.dealers,{name:fresh(liveName(),cur&&cur.name),phone:fresh($("#d-phone",sh).value,cur&&cur.phone),email:fresh($("#d-email",sh).value,cur&&cur.email)},id);
+    const dealerLine=m=>[m.item.phone,m.item.area,isProspect(m.item)?STAGE_L[stageOf(m.item)]:`Balance ${P(status(m.id).balance)}`].filter(Boolean).join(" · ");
+    const showDups=()=>{ const found=dealerDups(); ["name","contact"].forEach(k=>{ $("#d-dup-"+k,sh).innerHTML=dupPanel(found,k,dealerLine); }); };
+    $("#f",sh).addEventListener("input",showDups);
+    $("#f",sh).addEventListener("click",e=>{ const o=e.target.closest("[data-dup-open]"); if(o){ back(); dealerSheet(o.dataset.dupOpen); } });
+    // Clear an old error message and the “save anyway” confirmation as soon as the form changes.
+    $("#f",sh).addEventListener("input",()=>{ const err=$("#d-err",sh); if(err) err.textContent=""; const b=$("button[type=submit]",sh); if(b) delete b.dataset.ok; });
     $("#f",sh).addEventListener("submit",e=>{ e.preventDefault(); const btn=e.submitter||$("button[type=submit]",sh);
       if($("#d-cropper",sh)&&!$("#d-cropper",sh).hidden){ toast("Finish cropping the photo first"); return; }
-      const name=$("#d-name").value.trim(); if(!name) return;
-      const phone=$("#d-phone").value.trim(), digits=phone.replace(/\D/g,"").slice(-10);
-      const dup=[...S.dealers.entries()].find(([k,x])=>k!==id&&(x.name.trim().toLowerCase()===name.toLowerCase()||(digits.length>=7&&String(x.phone||"").replace(/\D/g,"").slice(-10)===digits)));
-      if(dup&&!btn.dataset.ok){ $("#d-err").textContent=`“${dup[1].name}” already has this ${dup[1].name.trim().toLowerCase()===name.toLowerCase()?"name":"mobile number"}. Press the button again to save anyway.`; btn.dataset.ok="1"; return; }
+      const clean=v=>String(v||"").trim().replace(/\s+/g," ");
+      const firstName=clean($("#d-first").value), middleName=clean($("#d-middle").value), lastName=clean($("#d-last").value);
+      const name=fullName(firstName,middleName,lastName);
+      if(!firstName||!lastName){ $("#d-err").textContent="Enter the dealer's first and last name."; (!firstName?$("#d-first"):$("#d-last")).focus(); return; }
+      const ageRaw=$("#d-age").value.trim(), age=ageRaw===""?null:Number(ageRaw);
+      if(age!=null&&(!Number.isInteger(age)||age<0||age>120)){ $("#d-err").textContent="Enter an age between 0 and 120, or leave it blank."; $("#d-age").focus(); return; }
+      const phone=$("#d-phone").value.trim();
+      const dup=dealerDups().find(m=>m.strong);
+      if(dup&&!btn.dataset.ok){ $("#d-err").textContent=`“${dup.item.name}” already has this ${dup.why.find(y=>y.strong).what}. Press the button again to save anyway.`; btn.dataset.ok="1"; return; }
       const email=$("#d-email").value.trim(); if(email&&!$("#d-email").checkValidity()){ $("#d-err").textContent="That email address doesn't look right."; return; }
       const lim=$("#d-limit").value.trim();
       const base=id?{...S.dealers.get(id)}:{createdAt:Date.now(),createdBy:S.me,active:true};
-      const data={...base,name,phone,email,messenger:$("#d-msgr").value.trim(),birthday:$("#d-bday").value||null,area:$("#d-area").value.trim(),address:$("#d-addr").value.trim(),
+      const data={...base,name,firstName,middleName,lastName,age,gender:$("#d-gender").value||null,phone,email,messenger:$("#d-msgr").value.trim(),birthday:$("#d-bday").value||null,area:$("#d-area").value.trim(),address:$("#d-addr").value.trim(),
         consent:(()=>{ const m=$("#d-consent").value; return !m?null:base.consent&&base.consent.method===m?base.consent:{method:m}; })(),
         stage:$("#d-stage").value,source:$("#d-src").value,referredBy:$("#d-ref").value.trim(),tags:$("#d-tags").value.split(",").map(t=>t.trim()).filter(Boolean),
         creditLimit:lim===""?null:r2(lim),terms:Math.max(0,Math.round(Number($("#d-terms").value)||0)),discountPct:$("#d-pct").value===""?null:Math.min(100,Math.max(0,Number($("#d-pct").value))),notes:$("#d-notes").value.trim(),updated:stamp()};
@@ -1735,6 +1913,7 @@ function agingSheet(preDealer){
           <tr><td>Share of unpaid</td>${AGE_B.map(([k])=>`<td class="r num">${R.tot.total?Math.round(R.tot[k]/R.tot.total*100)+"%":"—"}</td>`).join("")}<td></td><td></td></tr></tfoot></table></div>
           <p class="small muted">Each unpaid delivery or debit adjustment sits in one column, based on its due date. Payments, returns and credits settle the oldest deliveries first. Credit is money the dealer paid in advance that isn't applied yet. Each dealer's balance = the aging columns − credit.${R.ok?"":" <b>Warning: some balances did not reconcile.</b>"}</p>`
           :`<div class="empty"><p>No balances as of ${fmtDate(asOf)}.</p></div>`}
+        ${qrBlock(deepLink("aging",dealer||undefined),"Aging report",`As of ${fmtDate(asOf)}${dealer?" · "+(S.dealers.get(dealer)?.name||""):" · All dealers"}`)}
       </article>`,sh=>{
       $("#ag-asof",sh).addEventListener("change",e=>{ asOf=e.target.value||today(); paintSheet(true); });
       $("#ag-dealer",sh).addEventListener("change",e=>{ dealer=e.target.value; if(dealer) detail=true; paintSheet(true); });
@@ -1794,6 +1973,7 @@ function statementSheet(id){
         ${R.overdue?`<p class="rc-bal">Past due: <b class="num">${P(R.overdue)}</b></p>`:""}
         ${R.ag.open.length?`<table class="rc-tbl"><thead><tr><th>Unpaid as of ${fmtDate(to)}</th><th>Due</th><th class="r">Days late</th><th class="r">Unpaid</th></tr></thead><tbody>${R.ag.open.map(o=>`<tr><td>${esc(o.t.no||"")} · ${fmtDate(o.t.date)}</td><td class="nowrap">${fmtDate(o.t.dueDate)}</td><td class="r num">${o.late||"—"}</td><td class="r num">${P(o.rem)}</td></tr>`).join("")}</tbody></table>`:""}
         ${s.paymentInfo?`<p class="small"><b>How to pay:</b> ${esc(s.paymentInfo)}</p>`:""}
+        ${qrBlock(deepLink("statement",id),"Scan this statement",`${d.name} · ${fmtDate(from)} – ${fmtDate(to)}`)}
         <p class="rc-foot">This is not an official receipt. ${esc(s.footer??"Salamat po!")}</p>
       </article>`,sh=>{
       $("#sa-from",sh).addEventListener("change",e=>{ from=e.target.value||from; if(from>to) to=from; paintSheet(true); });
@@ -1841,7 +2021,7 @@ function dealerSheet(id){
     </div>`}
     ${st.maxLate>holdDays()?`<div class="notice bad"><p><b>On credit hold.</b> The oldest unpaid delivery is ${st.maxLate} days late. New credit sales are blocked until they pay${S.canAdmin?", unless you approve one":""}.</p></div>`:""}
     ${!d.creditLimit&&!fresh&&S.canWrite?`<div class="notice warn"><p>No credit limit set for this dealer. Set one so the app can warn you before risky releases.</p></div>`:""}
-    ${S.canWrite?`<div class="actions" style="margin-bottom:16px"><button class="btn primary" data-act="sale-for" data-id="${id}" type="button">+ Credit sale</button>${fresh?"":`<button class="btn" data-act="pay-for" data-id="${id}" type="button">+ Payment</button><button class="btn" data-act="ret-for" data-id="${id}" type="button">+ Return</button>${S.canAdmin?`<button class="btn" data-act="adjust-for" data-id="${id}" type="button">+ Adjustment</button><button class="btn danger" data-act="writeoff-for" data-id="${id}" type="button">+ Write-off</button>`:""}<button class="btn" data-act="remind-copy" data-id="${id}" type="button">Copy reminder</button>`}<button class="btn" data-act="opening-for" data-id="${id}" type="button">+ Opening balance</button>${window.APP&&S.acct&&S.acct.role==="owner"?`<button class="btn" data-act="portal-for" data-id="${id}" type="button">Portal access</button>`:""}<button class="btn" data-act="edit-dealer" data-id="${id}" type="button">Edit dealer</button></div>`:""}
+    ${S.canWrite?`<div class="actions" style="margin-bottom:16px"><button class="btn primary" data-act="sale-for" data-id="${id}" type="button">+ Credit sale</button>${fresh?"":`<button class="btn" data-act="pay-for" data-id="${id}" type="button">+ Payment</button><button class="btn" data-act="ret-for" data-id="${id}" type="button">+ Return</button>${S.canAdmin?`<button class="btn" data-act="adjust-for" data-id="${id}" type="button">+ Adjustment</button><button class="btn danger" data-act="writeoff-for" data-id="${id}" type="button">+ Write-off</button>`:""}<button class="btn" data-act="remind-copy" data-id="${id}" type="button">Copy reminder</button>`}<button class="btn" data-act="opening-for" data-id="${id}" type="button">+ Opening balance</button>${qrReady()?`<button class="btn" data-act="dealer-qr" data-id="${id}" type="button">QR code</button>`:""}${window.APP&&S.acct&&S.acct.role==="owner"?`<button class="btn" data-act="portal-for" data-id="${id}" type="button">Portal access</button>`:""}<button class="btn" data-act="edit-dealer" data-id="${id}" type="button">Edit dealer</button></div>`:""}
     ${d.notes?`<p class="small"><b>Notes:</b> ${esc(d.notes)}</p>`:""}
     ${isProspect(d)?crmPanel(id):""}
     ${fresh?"":`    <section class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>Statement to send</h2><div class="actions"><button class="btn sm" type="button" data-act="statement" data-id="${id}">Full statement</button><button class="btn sm" type="button" data-act="aging-for" data-id="${id}">Aging</button><button class="btn sm" type="button" id="copyStmt">Copy text</button></div></div>
@@ -1880,6 +2060,7 @@ function productForm(id){
     <label class="f span">Product name<input id="p-name" required maxlength="160" value="${esc(p.name)}" placeholder="Name and size, e.g. Dishwashing Liquid 1L"></label>
     <label class="f">Category<input id="p-cat" list="catList" value="${esc(p.category||"")}" placeholder="e.g. Home care"><datalist id="catList">${cats.map(c=>`<option value="${esc(c)}">`).join("")}</datalist></label>
     <label class="f">Code / SKU<input id="p-code" value="${esc(p.code)}"></label>
+    <div class="span dup-slot" id="p-dup" role="status" aria-live="polite"></div>
     <label class="f">SRP / catalog price (₱)<input id="p-srp" type="number" min="0" step="0.01" value="${esc(p.srp??"")}"><span class="hint">Credit sales use this price, less the dealer discount.</span></label>
     <label class="f">Dealer price (₱)<input id="p-dp" type="number" min="0" step="0.01" required value="${esc(p.dealerPrice)}"><span class="hint" id="p-dph">Price the dealer pays after discount.</span></label>
     <label class="f">Your cost (₱)<input id="p-cost" type="number" min="0" step="0.01" value="${esc(p.cost??"")}" placeholder="What you paid" ${S.canAdmin?"":"disabled"}><span class="hint">Used for gross profit. Only the owner or an editor can change it.</span></label>
@@ -1891,11 +2072,18 @@ function productForm(id){
       <label class="f">From<input id="p-pfrom" type="date" value="${esc(p.promo&&p.promo.from||"")}" ${S.canAdmin?"":"disabled"}></label>
       <label class="f">Until<input id="p-pto" type="date" value="${esc(p.promo&&p.promo.to||"")}" ${S.canAdmin?"":"disabled"}></label>
       <label class="chk span"><input type="checkbox" id="p-pnod" ${p.promo&&p.promo.noDiscount?"checked":""} ${S.canAdmin?"":"disabled"}> Promo price is final (no dealer discount on top)</label></div></div>
+    <p class="err span" id="p-err" role="alert" aria-live="polite" style="color:var(--bad);margin:0"></p>
     <div class="actions span"><button class="btn primary" type="submit">${id?"Save changes":"Add product"}</button><button class="btn" type="button" data-back>Cancel</button>
-    ${id?`<button class="btn" type="button" data-act="stock-for" data-id="${id}">Stock in / adjust</button>`:""}
+    ${id?`<button class="btn" type="button" data-act="stock-for" data-id="${id}">Stock in / adjust</button>${qrReady()?`<button class="btn" type="button" data-act="product-qr" data-id="${id}">QR label</button>`:""}`:""}
     ${id?(used?`<button class="btn" type="button" id="p-arch" style="margin-left:auto">${p.active===false?"Restore product":"Archive product"}</button>`:`<button class="btn danger" type="button" id="p-del" style="margin-left:auto">Delete product</button>`):""}</div></form>
     ${(p.priceHistory||[]).length?`<section class="panel" style="margin-top:16px"><h2>Price history</h2><table><tbody>${p.priceHistory.slice().reverse().map(h=>`<tr><td class="small nowrap">${fmtStamp(h.at)}</td><td class="small">${esc(h.catalog||"")}</td><td class="r num small">${h.from!=null?P(h.from):"—"} → <b>${P(h.to)}</b></td></tr>`).join("")}</tbody></table></section>`:""}
     ${mv.length?`<section class="panel" style="margin-top:16px"><h2>Recent stock changes</h2><table><tbody>${mv.map(m=>`<tr><td class="small nowrap">${fmtDate(m.date)}</td><td class="small">${esc(m.reason)}${m.note?" · "+esc(m.note):""}</td><td class="r num">${m.qty>0?"+":""}${m.qty}</td></tr>`).join("")}</tbody></table></section>`:""}`,sh=>{
+    // Look for this product as the form is filled in. An edit only checks what changed.
+    const fresh=(v,old)=>id&&normText(v)===normText(old)?"":v;
+    const productDups=()=>findProductMatches(S.products,{name:fresh($("#p-name",sh).value,p.name),code:fresh($("#p-code",sh).value,p.code)},id);
+    const productLine=m=>[m.item.code,`${m.item.stock||0} on hand`,P(m.item.dealerPrice)].filter(Boolean).join(" · ");
+    $("#f",sh).addEventListener("input",e=>{ $("#p-err",sh).textContent=""; delete $("button[type=submit]",sh).dataset.ok; if(e.target.matches("#p-name,#p-code")) $("#p-dup",sh).innerHTML=dupPanel(productDups(),"product",productLine); });
+    $("#f",sh).addEventListener("click",e=>{ const o=e.target.closest("[data-dup-open]"); if(o){ back(); productForm(o.dataset.dupOpen); } });
     const srpIn=$("#p-srp",sh), dpIn=$("#p-dp",sh); let dpTouched=!!dpIn.value;
     dpIn.addEventListener("input",()=>{ dpTouched=true; });
     srpIn.addEventListener("input",()=>{ const v=r2(srpIn.value*(1-storePct()/100)); $("#p-dph",sh).textContent=srpIn.value?`SRP less ${storePct()}% = ${P(v)}`:"Your cost to the dealer after discount."; if(!dpTouched&&srpIn.value) dpIn.value=v.toFixed(2); });
@@ -1926,6 +2114,8 @@ function productForm(id){
     const rm=$("#p-rmimg",sh); if(rm) rm.addEventListener("click",()=>{ dropFetched(); removeImg=true; newFile=null; if(fileIn) fileIn.value=""; $("#p-prev",sh).innerHTML=`<div class="big">Photo will be removed when you save</div>`; });
     $("#f",sh).addEventListener("submit",e=>{ e.preventDefault(); const btn=e.submitter||$("button[type=submit]",sh);
       const name=$("#p-name").value.trim(); if(!name) return; const re=$("#p-re").value.trim(); const link=$("#p-link").value.trim();
+      const dup=productDups().find(m=>m.strong);
+      if(dup&&!btn.dataset.ok){ $("#p-err").textContent=`“${dup.item.name}” already has this ${dup.why.find(y=>y.strong).what}. Press the button again to save anyway.`; btn.dataset.ok="1"; return; }
       const base=id?{...S.products.get(id)}:{createdAt:Date.now(),createdBy:S.me,active:true,stock:Math.max(0,Math.round(Number($("#p-stock").value)||0))};
       const oldImg=base.imageId||null;
       const data={...base,name,category:$("#p-cat").value.trim(),code:$("#p-code").value.trim(),dealerPrice:r2($("#p-dp").value),cost:$("#p-cost").value===""?null:r2($("#p-cost").value),srp:$("#p-srp").value?r2($("#p-srp").value):null,reorderLevel:re===""?null:Math.max(0,Number(re)),imageLink:/^https?:\/\//i.test(link)?link:null,updated:stamp()};
@@ -2439,6 +2629,7 @@ document.addEventListener("click",e=>{
        "stock-in":()=>stockForm(), "stock-for":()=>stockForm(id), "clear-samples":()=>{ if(armed(a,"Tap again to remove")) clearSamples(a); },
        "backup":async()=>{ if(await save(`ledger-backup-${today()}.json`,backupJson())){ lsSet("lastBackup",Date.now()); render(); } },
        "receipt":()=>receiptSheet(id), "aging":()=>agingSheet(), "aging-for":()=>agingSheet(id), "statement":()=>statementSheet(id),
+       "dealer-qr":()=>dealerQr(id), "product-qr":()=>productQr(id),
        "go-orders":()=>goView("orders"),
        "catalog":()=>catalogSheet(),
        "pay-amt":()=>paymentForm(id,null,{amount:Number(a.dataset.amt).toFixed(2),deliveryId:a.dataset.did||null}),
@@ -2452,7 +2643,7 @@ document.addEventListener("click",e=>{
        "remind-copy":()=>copyText(reminderText(id),"Reminder message"),
        "remind-mark":()=>guarded(a,async()=>{ const d=S.dealers.get(id); const on=d.lastReminded!==today(); await db.doc("dealers/"+id).update(on?{lastReminded:today(),lastRemindedBy:S.me}:{lastReminded:d.prevReminded||null}); if(on){ await db.doc("dealers/"+id).update({prevReminded:d.lastReminded||null}); await db.collection("interactions").doc().set({dealerId:id,kind:"message",date:today(),outcome:"Payment reminder sent",note:"",followUp:null,followUpDone:false,createdAt:Date.now(),createdBy:S.me}); } toast(on?`${d.name} marked as reminded`:"Reminder unmarked"); }),
         "export-tx":()=>save(`transactions-${today()}.csv`,csv([["Date","No.","Type","Status","Dealer","Items","Subtotal","Dealer discount %","Dealer discount","Extra discount","Amount","Direction","Due date","Method","Reference","Cost","Gross profit","Note"],...[...S.txns.values()].sort((x,y)=>(x.date||"").localeCompare(y.date||"")).map(t=>{ const d=S.dealers.get(t.dealerId), cost=r2((t.items||[]).reduce((a,i)=>a+i.qty*(i.cost!=null?Number(i.cost):Number((S.products.get(i.productId)||{}).cost)||0),0)); const effect=t.voided?0:txnEffect(t); return [t.date,t.no||"",TYPE_LABEL[t.type],t.voided?"Voided":"OK",d?d.name:"",(t.items||[]).map(i=>`${i.name} x${i.qty} @ ${i.price}`).join("; "),t.subtotal??"",t.discountPct??"",t.pctDiscount||"",t.discount||"",t.amount,t.direction||"",t.dueDate||"",t.method||"",t.ref||"",cost||"",t.type==="sale"?r2(t.amount-cost):t.type==="return"?r2(cost-t.amount):"",`${t.note||""}${t.reason?` · ${t.reason}`:""}${t.voided?` · balance effect ${P(effect)}`:""}`]; })])),
-        "export-dealers":()=>save(`dealers-${today()}.csv`,csv([["Dealer ID","Stage","Email","Address","Source","Referred by","Tags","Last contact","Next follow-up","Dealer","Mobile","Area","Credit limit","Terms (days)","Balance","Overdue","Days late","Last payment","Rating","Paid on time %","Avg days to pay","Worst delay (days)","Total credit taken","Total paid","Write-offs","Status"],...[...S.dealers.entries()].map(([id,d])=>{ const st=status(id), h=history(id), c=crmInfo(id); return [id,STAGE_L[stageOf(d)],d.email||"",d.address||"",d.source||"",d.referredBy||"",(d.tags||[]).join("; "),c.last||"",c.next?c.next[1].followUp:"",d.name,d.phone,d.area,d.creditLimit??"",d.terms??"",st.balance,st.overdue,st.maxLate,h.lastPay||"",h.grade.g,h.n?Math.round(h.onTime/h.n*100):"",h.avgDays??"",h.worst,h.taken,h.paid,h.writeoff||0,d.active===false?"Archived":"Active"]; })])),
+        "export-dealers":()=>save(`dealers-${today()}.csv`,csv([["Dealer ID","Stage","Email","Address","Source","Referred by","Tags","Last contact","Next follow-up","Dealer","First name","Middle name","Last name","Age","Gender","Mobile","Area","Credit limit","Terms (days)","Balance","Overdue","Days late","Last payment","Rating","Paid on time %","Avg days to pay","Worst delay (days)","Total credit taken","Total paid","Write-offs","Status"],...[...S.dealers.entries()].map(([id,d])=>{ const st=status(id), h=history(id), c=crmInfo(id); return [id,STAGE_L[stageOf(d)],d.email||"",d.address||"",d.source||"",d.referredBy||"",(d.tags||[]).join("; "),c.last||"",c.next?c.next[1].followUp:"",d.name,d.firstName||"",d.middleName||"",d.lastName||"",d.age??"",d.gender||"",d.phone,d.area,d.creditLimit??"",d.terms??"",st.balance,st.overdue,st.maxLate,h.lastPay||"",h.grade.g,h.n?Math.round(h.onTime/h.n*100):"",h.avgDays??"",h.worst,h.taken,h.paid,h.writeoff||0,d.active===false?"Archived":"Active"]; })])),
         "export-products":()=>save(`products-${today()}.csv`,csv([["Product","Category","Code","Dealer price","SRP","Cost","Profit per piece","Margin %","Stock","Reorder level","Status"],...[...S.products.values()].map(p=>{ const profit=p.cost!=null?r2(p.dealerPrice-p.cost):""; return [p.name,p.category||"",p.code||"",p.dealerPrice,p.srp??"",p.cost??"",profit,profit!==""&&p.dealerPrice?Math.round(profit/p.dealerPrice*100):"",p.stock,p.reorderLevel??"",p.active===false?"Archived":"Active"]; })])),
         "export-report":()=>{ const R=reportData(); save(`report-${R.from}-to-${R.to}.csv`,csv([["Report",`${R.from} to ${R.to}`],[],["Credit sales",R.tot.sale],["Discounts",R.tot.discount],["Returns",R.tot.return],["Debit adjustments",R.tot.adjustmentDebit],["Credit adjustments",R.tot.adjustmentCredit],["Write-offs",R.tot.writeoff],["Collections",R.tot.payment],["Cost of goods sold",R.tot.cost],["Gross profit",R.tot.profit],[],["Product","Qty sold","Qty returned","Sales","Cost","Profit"],...Object.values(R.byP).map(p=>[p.name,p.qty,p.ret,r2(p.amt),r2(p.cost),r2(p.profit)]),[],["Dealer","Net sales","Paid","Balance now","Write-offs"],...Object.entries(R.byD).map(([id,d])=>[S.dealers.get(id)?.name||"",r2(d.sale-d.return),r2(d.payment),status(id).balance,r2(d.writeoff)]),[],["Method","Collected"],...Object.entries(R.byM)])); },
         "backup-full":async()=>{ if(!window.APP) return toast("Full backups need the server connection"); await guarded(a,async()=>{ const data=await window.APP.backupFull(); if(await save(`ledger-full-${today()}.json`,JSON.stringify(data,null,1))){ lsSet("lastBackup",Date.now()); toast("Full backup downloaded"); render(); } }); },
@@ -2489,8 +2680,38 @@ document.addEventListener("submit",e=>{
   guarded(btn,async()=>{ await db.doc("settings/store").set(data); toast("Store details saved"); btn.disabled=false; });
 });
 const VIEWS=["overview","orders","collect","dealers","products","activity","reports","store"];
-const fromHash=()=>{ const h=location.hash.slice(1); if(VIEWS.includes(h)) S.view=h; };
-window.addEventListener("hashchange",()=>{ fromHash(); render(); }); fromHash(); render();
+// QR codes carry app deep links: #dealer/<id>, #product/<id>, #receipt/<id>,
+// #statement/<id>, #order/<id>, #aging[ /<dealerId>] and #summary.
+const DEEP_KINDS={dealer:1,product:1,tx:1,receipt:1,statement:1,order:1,aging:1};
+function hashTarget(hash){
+  const h=String(hash||"").replace(/^#/,""); if(!h) return null;
+  let x=h; try{ x=decodeURIComponent(h); }catch(e){}
+  if(VIEWS.includes(x)) return {view:x};
+  if(x==="summary"||x==="dashboard") return {kind:"summary"};
+  if(x==="aging") return {kind:"aging"};
+  const slash=x.indexOf("/"); if(slash<1) return null;
+  const kind=x.slice(0,slash), id=x.slice(slash+1);
+  if(!id||!DEEP_KINDS[kind]) return null;
+  return {kind,id};
+}
+let deepOpened=false;
+function fromHash(){ S._deep=null; const t=hashTarget(location.hash); if(!t) return; if(t.view) S.view=t.view; else S._deep=t; }
+function openDeepLink(){
+  if(deepOpened) return;
+  if(!S._deep){ deepOpened=true; return; }
+  if(!Object.values(S.loaded).every(Boolean)) return;
+  const {kind,id}=S._deep; S._deep=null; deepOpened=true;
+  const missing=what=>toast(`That ${what} isn't in this ledger.`,"error");
+  if(kind==="summary"){ closeAll(); ownerSummarySheet(); return; }
+  if(kind==="aging"){ if(id&&!S.dealers.has(id)) return missing("dealer"); closeAll(); agingSheet(id||undefined); return; }
+  if(kind==="dealer"){ if(!S.dealers.has(id)) return missing("dealer"); closeAll(); dealerSheet(id); return; }
+  if(kind==="product"){ if(!S.products.has(id)) return missing("product"); closeAll(); productForm(id); return; }
+  if(kind==="statement"){ if(!S.dealers.has(id)) return missing("dealer"); closeAll(); statementSheet(id); return; }
+  if(kind==="order"){ if(!S.orders.has(id)) return missing("order"); closeAll(); orderSheet(id); return; }
+  if(kind==="receipt"||kind==="tx"){ if(!S.txns.has(id)) return missing("receipt"); closeAll(); if(kind==="receipt") receiptSheet(id); else txSheet(id); return; }
+}
+window.addEventListener("hashchange",()=>{ deepOpened=false; fromHash(); if(S._deep){ render(); openDeepLink(); } else { closeAll(); render(); } });
+fromHash(); render();
 
 /* ================= data ================= */
 (async()=>{
@@ -2503,7 +2724,7 @@ window.addEventListener("hashchange",()=>{ fromHash(); render(); }); fromHash();
   let timer=setTimeout(()=>{ sync.textContent="Can't reach the ledger yet. Check your internet connection."; },10000);
   const onErr=e=>{ clearTimeout(timer); console.error(e); sync.textContent=e&&e.code==="invalid_argument"?"You don't have access to this ledger's data.":"Lost connection. Reload the page to retry."; if(!Object.values(S.loaded).every(Boolean)) $("#main").innerHTML=`<section class="panel"><div class="empty"><h3>Couldn't load the ledger</h3><p>${esc(sync.textContent)}</p></div></section>`; };
   const norm={dealers:x=>x,products:x=>({...x,stock:Number(x.stock)||0,dealerPrice:Number(x.dealerPrice)||0}),txns:x=>({...x,amount:Number(x.amount)||0}),moves:x=>({...x,qty:Number(x.qty)||0})};
-  let raf=0; const schedule=()=>{ if(raf) return; raf=requestAnimationFrame(()=>{ raf=0; render(); paintSheet(true); }); };
+  let raf=0; const schedule=()=>{ if(raf) return; raf=requestAnimationFrame(()=>{ raf=0; render(); paintSheet(true); openDeepLink(); }); };
   const done=meta=>{ if(!meta.fromCache&&Object.values(S.loaded).every(Boolean)){ clearTimeout(timer); sync.textContent=offlineText()||(S.canWrite?"Saved · updates live":"View only · updates live"); } };
   window.addEventListener("dcl-offline",()=>{ if(Object.values(S.loaded).every(Boolean)){ clearTimeout(timer); sync.textContent=offlineText()||(S.canWrite?"Saved · updates live":"View only · updates live"); } S._ver++; schedule(); });
   COLS.forEach(c=>db.collection(c).onSnapshot(snap=>{ const m=new Map(); snap.docs.forEach(d=>m.set(d.id,(norm[c]||(x=>x))(d.data())));

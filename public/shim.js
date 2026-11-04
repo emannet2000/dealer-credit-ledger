@@ -55,7 +55,7 @@
   // Keep only what a collector needs on the device.
   const lean = (c, data) => {
     if (c !== "dealers") return data;
-    const { birthday, email, messenger, address, stageHistory, limitHistory, ...rest } = data;
+    const { firstName, middleName, lastName, age, gender, birthday, email, messenger, address, stageHistory, limitHistory, ...rest } = data;
     return rest;
   };
   const saveQueue = () => Promise.all([kv.set("queue", off.queue), kv.set("held", off.held)]);

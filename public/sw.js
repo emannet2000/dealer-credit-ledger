@@ -3,8 +3,8 @@
    Ledger data is never cached here: shim.js keeps the collector's data in IndexedDB
    and queues offline payments. Signing out clears this cache. */
 "use strict";
-const SHELL = "dcl-shell-v1";
-const STATIC = ["/shim.js", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
+const SHELL = "dcl-shell-v2";
+const STATIC = ["/shim.js", "/fonts.js", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(SHELL).then((c) => c.addAll(STATIC)).catch(() => {}).then(() => self.skipWaiting()));

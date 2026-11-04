@@ -5,7 +5,7 @@ This document defines the target functional requirements for the Dealer Credit L
 - **Document version:** 1.5
 - **Application version:** 1.0 (Node.js 20+, SQLite, vanilla JS)
 - **Last updated:** 3 November 2026
-- **Requirement count:** 87 functional, plus 12 production-readiness items
+- **Requirement count:** 88 functional, plus 12 production-readiness items
 
 ## How to read this document
 
@@ -35,8 +35,8 @@ This document defines the target functional requirements for the Dealer Credit L
 | Collections and controls | FR-071 – FR-074 | 4 | 0 | 0 | 4 |
 | Dealer relationships (CRM) | FR-075 | 1 | 1 | 0 | 0 |
 | Field collections, privacy and growth | FR-076 – FR-082 | 7 | 1 | 1 | 5 |
-| Catalog media, approvals and field use | FR-083 – FR-087 | 5 | 4 | 0 | 1 |
-| **Total** | | **87** | **59** | **3** | **25** |
+| Catalog media, approvals and field use | FR-083 – FR-088 | 6 | 5 | 0 | 1 |
+| **Total** | | **88** | **60** | **3** | **25** |
 
 ### P0 items delivered in this release
 
@@ -950,7 +950,7 @@ This document defines the target functional requirements for the Dealer Credit L
 - **Status:** Implemented
 - **User story:** As store staff, I want to track prospects and every call, visit and message with a dealer, with follow-up reminders, so recruiting and collection conversations don't get lost.
 - **Acceptance criteria:**
-  - A dealer record holds contact details (mobile, email, Messenger link, birthday, area, full address), source, referrer, tags and a stage: new lead, contacted, interested, dealer or lost.
+  - A dealer record holds personal details (first, middle and last name, age, gender, mobile, email, Messenger link, birthday, area, full address), source, referrer, tags and a stage: new lead, contacted, interested, dealer or lost.
   - Prospects can be added without credit terms and become dealers automatically on their first credit sale; every stage change is kept in a stage history.
   - Staff can log a call, visit, message, meeting or note with an outcome, notes and an optional follow-up date.
   - Open follow-ups due within seven days appear on the overview; overdue ones are highlighted and can be marked done.
@@ -1000,7 +1000,7 @@ This document defines the target functional requirements for the Dealer Credit L
   - The owner can export everything held about one dealer (profile, contact log, transactions, uploads) as a file.
   - A lost prospect, or a dealer with no balance and no transactions inside the retention period, can be anonymised on request; financial records needed by law are kept with personal fields removed.
   - Opening a dealer profile, exporting personal data and anonymising are written to the activity log.
-  - Personal fields such as birthday, full address and contact notes are hidden from viewer accounts.
+  - Personal fields such as name parts, age, gender, birthday, full address and contact notes are hidden from viewer accounts.
 
 ### FR-079 — Daily cash close
 
@@ -1120,6 +1120,18 @@ This document defines the target functional requirements for the Dealer Credit L
   - Reminder and statement message templates can be set separately for each language, and each dealer's preferred language is used.
   - Dates and amounts keep the Philippine format in both languages.
   - Untranslated text falls back to English without breaking the layout.
+
+### FR-088 — Detect existing dealers and products
+
+- **Priority:** P1
+- **Status:** Implemented
+- **User story:** As store staff, I want to see if a dealer or product is already in the ledger while I add it, so I don't create a second record that splits its balance or stock.
+- **Acceptance criteria:**
+  - While a dealer is entered, the form lists existing dealers with the same mobile number (any format), email or name, and similar names such as a missing middle name or a one-letter typo.
+  - While a product is entered, the form lists existing products with the same code or name, and similar names. Different sizes, such as 1L and 2L, don't match.
+  - Each match shows details that help tell records apart, is labelled if archived, and can be opened from the form.
+  - An exact match needs a second press to save, so genuine duplicates such as two people with one name are still possible. A similar match only shows a hint.
+  - Editing a record only checks the fields that changed.
 
 ---
 
@@ -1312,6 +1324,8 @@ These apply to every functional requirement above.
 - **Cost snapshot:** sale and return lines store `cost` at the time they are recorded. Reports prefer the snapshot and fall back to the product's current cost.
 - **Full backup:** `GET /api/backup/full`; full restore: `POST /api/backup/restore` with a 50 MB JSON limit.
 - **Aging and statements:** `agingFor(dealerId, asOf)` in `public/index.html` settles charges FIFO using only transactions dated on or before the as-of date, so each unpaid charge falls in one bucket and buckets − unapplied credit = balance. `periodStatement()` reuses it to show what is unpaid at the end of the period. Both open as printable sheets; the aging report exports CSV with dealer and transaction IDs and ISO dates.
+- **QR codes:** `GET /api/qr?data=…&size=…` returns an authenticated PNG (text capped at 600 characters, size clamped to 96–600 px). Receipts, statements, aging reports and the owner summary print a QR code, and dealers and products have printable QR labels. Each code encodes an app deep link such as `#receipt/<id>`, `#statement/<id>`, `#aging[/<dealerId>]`, `#summary`, `#dealer/<id>` or `#product/<id>`; `hashTarget()` parses it and `openDeepLink()` opens the record after the ledger loads. The dealer portal understands the same receipt, statement, order, dealer and product links, so a dealer who scans a receipt sees it in their account.
+- **Duplicate checks:** `findDealerMatches()` and `findProductMatches()` in `public/index.html` run in the browser as a form is filled in, against the full dealer and product lists including archived records. Anonymised dealers are skipped. They warn but don't block, so two different people can share a name; the server does not enforce uniqueness.
 - **Dealer CRM:** dealers carry `stage`, `stageHistory`, contact fields and `tags`; contact entries live in the `interactions` collection (`dealerId`, `kind`, `date`, `outcome`, `note`, `followUp`, `followUpDone`). The server promotes a prospect to `dealer` inside the same transaction as its first sale.
 - **Product pictures from the internet:** `POST /api/assets/fetch { url }` downloads a picture on the server (`lib/fetch-image.js`) and stores it like an upload. Only http(s) on ports 80/443; every resolved address must be public (checked at connect time and on each redirect); 8 MB and 12 s limits; the file must really be JPG, PNG, WebP or GIF; a product page link uses its `og:image`. The source link is kept as `imageLink` and in the activity log. `IMAGE_FETCH_ALLOW_PRIVATE=1` lifts the address check and is for tests only.
 - **Settlement:** `settle()` in `lib/credit.js` (mirrored in `index.html` and `portal.html`) processes a dealer's transactions in date order; a payment's `alloc` pays the chosen deliveries first and the rest goes oldest-first. Balances, aging, statements, credit history, receipts and the credit-hold check all use it.

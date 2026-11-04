@@ -1,10 +1,10 @@
 "use strict";
-// Browser tests of the main flows. Run with: CHROME_PATH=/path/to/chrome npm run test:e2e
+// Browser tests of the main flows. Run with: npm run test:e2e (set CHROME_PATH if Chrome is not found)
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { startApp, startBrowser, day } = require("./browser");
+const { startApp, startBrowser, findChrome, day } = require("./browser");
 
-const skip = !process.env.CHROME_PATH && "set CHROME_PATH to run browser tests";
+const skip = !findChrome() && "install Chrome or set CHROME_PATH to run browser tests";
 let app, b;
 
 test.before(async () => {
@@ -82,6 +82,39 @@ test("a blocked staff sale is sent for approval and the owner approves it", { sk
   assert.ok(sale.data.override && sale.data.override.requestId);
   assert.equal(await stock(), before - 1);
   assert.deepEqual(b.errors, []);
+});
+
+test("adding a dealer or product shows the existing record and can open it", { skip }, async () => {
+  await b.signIn(app.base, app.jar.owner);
+  const count = async (c) => (await app.api("owner", "GET", `/api/c/${c}`)).data.length;
+
+  const dealers = await count("dealers");
+  await b.click(".tab[data-view=dealers]");
+  await b.click("[data-act=new-dealer]");
+  await b.fill("#d-first", "ana");
+  await b.fill("#d-last", "REYES");
+  await b.waitFor("document.querySelector('#d-dup-name .dup-row')");
+  assert.match(await b.text("#d-dup-name"), /Already in your list[\s\S]*Ana Reyes[\s\S]*Same name/);
+  await b.click("#f button[type=submit]");
+  await b.waitFor("/already has this name/.test(document.querySelector('#d-err')?.innerText||'')");
+  assert.equal(await count("dealers"), dealers, "the first press doesn't save");
+  await b.click("#d-dup-name [data-dup-open]");
+  await b.waitFor("!document.querySelector('#d-first') && /Ana Reyes/.test(document.querySelector('.sheet')?.innerText||'')");
+  await b.click("[data-close]");
+
+  const products = await count("products");
+  await b.click(".tab[data-view=products]");
+  await b.click("[data-act=new-product]");
+  await b.fill("#p-name", "DISH  soap");
+  await b.waitFor("document.querySelector('#p-dup .dup-row')");
+  assert.match(await b.text("#p-dup"), /Dish Soap[\s\S]*Same name[\s\S]*on hand/);
+  await b.fill("#p-dp", "10");
+  await b.click("#f button[type=submit]");
+  await b.waitFor("/already has this name/.test(document.querySelector('#p-err')?.innerText||'')");
+  assert.equal(await count("products"), products, "the first press doesn't save");
+  await b.click("#f button[type=submit]");
+  await b.waitFor("!document.querySelector('#p-name')");
+  assert.equal(await count("products"), products + 1, "the second press saves anyway");
 });
 
 test("the owner gives a dealer portal access and the dealer signs in", { skip }, async () => {

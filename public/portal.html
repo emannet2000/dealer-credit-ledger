@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#0d6b5c">
 <title>My Account · Dealer Portal</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Public+Sans:wght@400;500;600;700&display=swap">
+<script src="/fonts.js" data-href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Public+Sans:wght@400;500;600;700&display=swap"></script>
 <style>
 /* Layout: one narrow column for phones; balance card first, then tabs for unpaid, history, catalog, account. */
 :root{
@@ -73,6 +73,9 @@ dl.kv dt{color:var(--muted)} dl.kv dd{margin:0}
 .receipt th{text-align:left;color:#555;font-size:11px;text-transform:uppercase;border-bottom:1px solid #999;padding:4px}
 .receipt td{border-bottom:1px solid #ddd;padding:5px 4px}
 .receipt .r{text-align:right}
+.qr-block{display:flex;gap:12px;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid #ddd;color:#111}
+.qr-block img{width:96px;height:96px;flex:none;border:1px solid #ddd;border-radius:8px;padding:5px;background:#fff}
+.qr-block .small{line-height:1.35}
 .rc-total{display:flex;justify-content:space-between;border-top:2px solid #111;padding-top:8px;font-weight:700}
 .rc-total b{font-family:var(--f-display);font-size:20px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:8px;z-index:40;font-weight:600;font-size:14px}
@@ -145,6 +148,12 @@ const txnEffect=t=>{ if(!t||t.voided) return 0; return isCharge(t)?r2(Number(t.a
 function toast(m){ document.querySelectorAll(".toast").forEach(x=>x.remove()); const t=document.createElement("div"); t.className="toast"; t.setAttribute("role","status"); t.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg><span></span>'; t.lastChild.textContent=m; document.body.appendChild(t); setTimeout(()=>t.remove(),2800); }
 async function api(method,url,body){ const r=await fetch(url,{method,credentials:"same-origin",headers:body?{"Content-Type":"application/json"}:{},body:body?JSON.stringify(body):undefined});
   if(r.status===401){ location.href="/login"; throw new Error("Signed out"); } const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(d.message||"Something went wrong. Try again."); return d; }
+function deepLink(kind,id){ return `${location.origin}/#${kind}${id?"/"+encodeURIComponent(id):""}`; }
+function qrUrl(text,size){ return `/api/qr?data=${encodeURIComponent(String(text))}&size=${Math.max(96,Math.min(600,Math.round(Number(size)||240)))}`; }
+function qrBlock(text,label){
+  if(location.protocol==="file:"||navigator.onLine===false) return "";
+  return `<div class="qr-block"><img src="${esc(qrUrl(text,170))}" alt="${esc(label)} QR code" width="170" height="170"><div class="small"><b>${esc(label)}</b><div class="muted">Scan with a phone camera to open it again.</div></div></div>`;
+}
 
 const S={me:null,dealer:null,txns:[],products:[],orders:[],settings:{},tab:"unpaid",q:"",cart:new Map()};
 try{ const c=JSON.parse(localStorage.getItem("portal-cart")||"[]"); S.cart=new Map(c); }catch(e){}
@@ -226,6 +235,7 @@ function receipt(id){
     ${t.type==="sale"?`<p>Due date: <b>${fmtDate(t.dueDate)}</b></p>`:""}${t.type==="payment"?`<p>Paid by ${esc(t.method||"")}${t.ref?" · Ref "+esc(t.ref):""}</p>`:""}${t.type==="adjustment"&&t.reason?`<p>Reason: ${esc(t.reason)}</p>`:""}${t.type==="writeoff"&&t.reason?`<p>Reason: ${esc(t.reason)}</p>`:""}
     ${t.voided?"":`<p>Your balance after this: <b>${P(c.runAt.get(t))}</b></p>`}
     ${t.type==="payment"&&(t.applied||[]).length?`<table><thead><tr><th>Applied to</th><th class="r">Paid</th><th class="r">Still owed</th></tr></thead><tbody>${t.applied.map(a=>`<tr><td>${esc(a.no)}</td><td class="r">${P(a.amount)}</td><td class="r">${a.left>0.004?P(a.left):"Fully paid"}</td></tr>`).join("")}</tbody></table>`:""}
+    ${qrBlock(deepLink("receipt",id),"Receipt "+(t.no||""))}
     <p style="font-size:12px;color:#666;text-align:center;margin-bottom:0">This is not an official receipt.</p></article></div></div>`;
   const close=()=>{ $("#modalRoot").innerHTML=""; };
   $("#close").addEventListener("click",close); $("#ov").addEventListener("mousedown",e=>{ if(e.target.id==="ov") close(); });
@@ -282,15 +292,31 @@ document.addEventListener("submit",async e=>{ if(e.target.id!=="pw") return; e.p
   try{ await api("POST","/api/me/password",{current:$("#pw1").value,next:$("#pw2").value}); toast("Password changed"); e.target.reset(); }catch(err){ toast(err.message); } b.disabled=false; });
 $("#logout").addEventListener("click",()=>api("POST","/api/logout").finally(()=>location.href="/login"));
 
+let hashOpened=false;
+function openHash(){
+  if(!S.dealer) return;
+  let x=String(location.hash||"").replace(/^#/,""); if(!x) return;
+  try{ x=decodeURIComponent(x); }catch(e){}
+  const slash=x.indexOf("/"), kind=slash>-1?x.slice(0,slash):x, id=slash>-1?x.slice(slash+1):"";
+  if((kind==="receipt"||kind==="tx")&&id){ if(S.txns.some(t=>t._id===id)) return receipt(id); return toast("That receipt isn't in your account."); }
+  if(kind==="order"&&id){ if(S.orders.some(o=>o._id===id)) return orderDetail(id); return toast("That order isn't in your account."); }
+  if(kind==="product"&&id){ const p=S.products.find(v=>v._id===id); if(p){ S.tab="catalog"; S.q=p.name; render(); } return; }
+  if(kind==="dealer"&&id){ S.tab=S.me&&S.me.dealerId===id?"account":"unpaid"; render(); return; }
+  if(kind==="aging"){ S.tab="unpaid"; render(); return; }
+  if(kind==="statement"){ S.tab="history"; render(); return; }
+  if(kind==="summary"){ render(); }
+}
 async function load(){
   try{
     const [me,dealers,txns,products,settings,orders]=await Promise.all([api("GET","/api/me"),api("GET","/api/c/dealers"),api("GET","/api/c/txns"),api("GET","/api/c/products"),api("GET","/api/c/settings"),api("GET","/api/c/orders")]);
     S.orders=orders.map(r=>({...r.data,_id:r.id}));
     S.me=me; S.dealer=dealers[0]?dealers[0].data:null; S.txns=txns.map(r=>({...r.data,_id:r.id})); S.products=products.map(r=>({...r.data,_id:r.id})); for(const k of [...S.cart.keys()]) if(!S.products.find(p=>p._id===k)) S.cart.delete(k); S.settings=settings[0]?settings[0].data:{};
     $("#sync").textContent="Updated "+new Date().toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"}); render();
+    if(!hashOpened){ hashOpened=true; openHash(); }
   }catch(e){ $("#sync").textContent="Couldn't load your account. Check your internet connection."; }
 }
 load();
+window.addEventListener("hashchange",()=>{ hashOpened=false; openHash(); });
 let t; const later=()=>{ clearTimeout(t); t=setTimeout(load,300); };
 if(window.EventSource){ const es=new EventSource("/api/events"); es.addEventListener("change",later); }
 document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible") load(); });

@@ -35,7 +35,7 @@ let server, base;
 
 function client() {
   let cookie = "";
-  return async (method, url, body, headers = {}) => {
+  const c = async (method, url, body, headers = {}) => {
     const isBuf = Buffer.isBuffer(body);
     const r = await fetch(base + url, {
       method,
@@ -49,6 +49,8 @@ function client() {
     let data; try { data = JSON.parse(text); } catch { data = text; }
     return { status: r.status, data };
   };
+  c.raw = (url) => fetch(base + url, { headers: cookie ? { Cookie: cookie } : {}, redirect: "manual" });
+  return c;
 }
 const owner = client(), staff = client(), viewer = client(), anon = client();
 const day = (offset) => { const d = new Date(); d.setDate(d.getDate() + offset); return d.toISOString().slice(0, 10); };
@@ -66,6 +68,22 @@ test("first run creates the owner, then setup is closed", async () => {
 test("signed-out visitors get nothing", async () => {
   assert.equal((await anon("GET", "/api/c/dealers")).status, 401);
   assert.equal((await anon("GET", "/")).status, 302);
+});
+
+test("QR codes are generated for signed-in users only", async () => {
+  assert.equal((await anon("GET", "/api/qr?data=hello")).status, 401);
+  assert.equal((await owner("GET", "/api/qr")).status, 400, "empty text is rejected");
+  assert.equal((await owner("GET", "/api/qr?data=" + encodeURIComponent("x".repeat(601)))).status, 400, "text is capped");
+  const r = await owner.raw("/api/qr?data=" + encodeURIComponent("http://localhost/#dealer/abc") + "&size=9999");
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get("content-type"), "image/png");
+  assert.match(r.headers.get("cache-control") || "", /private/);
+  const buf = Buffer.from(await r.arrayBuffer());
+  assert.ok(buf.length > 100, "a PNG is returned");
+  assert.deepEqual([...buf.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], "PNG signature");
+  assert.equal(buf.readUInt32BE(16), 600, "large sizes are clamped");
+  const small = Buffer.from(await (await owner.raw("/api/qr?data=hi&size=1")).arrayBuffer());
+  assert.equal(small.readUInt32BE(16), 96, "small sizes are clamped");
 });
 
 test("owner adds staff and viewer accounts; wrong passwords are rejected", async () => {
@@ -106,6 +124,39 @@ test("staff can't change credit limits, prices or settings, or delete", async ()
   assert.equal((await staff("DELETE", "/api/c/txns/s1")).status, 403);
   assert.equal((await viewer("PUT", "/api/c/dealers/v1", { data: { name: "V" } })).status, 403);
   assert.equal((await viewer("GET", "/api/c/dealers")).status, 200);
+});
+
+test("a dealer keeps first, middle and last names, age, gender and address", async () => {
+  const created = await owner("PUT", "/api/c/dealers/np1", { data: {
+    firstName: " Juana ", middleName: "Santos", lastName: "Dela Cruz", age: 34, gender: "Female",
+    address: "12 Rizal St, Brgy. San Isidro", phone: "0917 123 4567",
+  } });
+  assert.equal(created.status, 200);
+  let d = (await owner("GET", "/api/c/dealers")).data.find((x) => x.id === "np1").data;
+  assert.equal(d.name, "Juana Santos Dela Cruz", "the display name is built from the parts");
+  assert.equal(d.firstName, "Juana", "parts are trimmed");
+  assert.equal(d.middleName, "Santos");
+  assert.equal(d.lastName, "Dela Cruz");
+  assert.equal(d.age, 34);
+  assert.equal(d.gender, "female", "gender is stored in a consistent form");
+  assert.equal(d.address, "12 Rizal St, Brgy. San Isidro");
+
+  assert.equal((await owner("PUT", "/api/c/dealers/np2", { data: { firstName: "A", lastName: "B", age: 121 } })).status, 400);
+  assert.equal((await owner("PUT", "/api/c/dealers/np2", { data: { firstName: "A", lastName: "B", age: 3.5 } })).status, 400);
+  assert.equal((await owner("PUT", "/api/c/dealers/np2", { data: { firstName: "A", lastName: "B", gender: "unknown" } })).status, 400);
+
+  // Name parts are enough on their own; the display name is built for the caller.
+  const partsOnly = await owner("PUT", "/api/c/dealers/np3", { data: { firstName: "Ana", lastName: "Reyes" } });
+  assert.equal(partsOnly.status, 200);
+  assert.equal(partsOnly.data.data.name, "Ana Reyes");
+
+  // Older full-name-only edits still work and are split into parts.
+  const legacy = await owner("PATCH", "/api/c/dealers/np1", { data: { name: "Juana S. Dela Cruz" } });
+  assert.equal(legacy.status, 200);
+  assert.equal(legacy.data.data.firstName, "Juana");
+  assert.equal(legacy.data.data.middleName, "S.");
+  assert.equal(legacy.data.data.lastName, "Dela Cruz");
+  assert.equal(legacy.data.data.age, 34, "unrelated fields are kept");
 });
 
 test("staff can edit their own records today, but not other people's", async () => {
@@ -765,7 +816,7 @@ test("personal data: consent, viewer limits, export and removal (PR-06, FR-078)"
   assert.notEqual(v2, v1, "a changed notice gets a new version");
 
   // Staff record consent; the server stamps who, when and which notice.
-  await owner("PUT", "/api/c/dealers/pd1", { data: { name: "Private Pia", phone: "0917 000 1111", birthday: "1990-05-05", address: "12 Rizal St", notes: "Pays Fridays" } });
+  await owner("PUT", "/api/c/dealers/pd1", { data: { name: "Private Pia", firstName: "Private", lastName: "Pia", age: 30, gender: "female", phone: "0917 000 1111", birthday: "1990-05-05", address: "12 Rizal St", notes: "Pays Fridays" } });
   const cur = (await owner("GET", "/api/c/dealers")).data.find((d) => d.id === "pd1").data;
   const c1 = await staff("PUT", "/api/c/dealers/pd1", { data: { ...cur, consent: { method: "signed form" } } });
   assert.equal(c1.data.data.consent.noticeVersion, v2);
@@ -778,7 +829,7 @@ test("personal data: consent, viewer limits, export and removal (PR-06, FR-078)"
   await owner("PUT", "/api/c/interactions/pd-i1", { data: { dealerId: "pd1", kind: "call", date: day(0), note: "Talked about her family" } });
   const seen = (await viewer("GET", "/api/c/dealers")).data.find((d) => d.id === "pd1").data;
   assert.equal(seen.name, "Private Pia");
-  for (const k of ["phone", "birthday", "address", "notes", "consent"]) assert.equal(seen[k], undefined, k);
+  for (const k of ["firstName", "middleName", "lastName", "age", "gender", "phone", "birthday", "address", "notes", "consent"]) assert.equal(seen[k], undefined, k);
   assert.deepEqual((await viewer("GET", "/api/c/interactions")).data, []);
 
   // A dealer accepts the notice in the portal.
@@ -797,6 +848,8 @@ test("personal data: consent, viewer limits, export and removal (PR-06, FR-078)"
   assert.equal((await staff("GET", "/api/dealers/pd1/export")).status, 403);
   const ex = await owner("GET", "/api/dealers/pd1/export");
   assert.equal(ex.data.dealer.birthday, "1990-05-05");
+  assert.equal(ex.data.dealer.age, 30);
+  assert.equal(ex.data.dealer.gender, "female");
   assert.equal(ex.data.contactLog.length, 1);
   assert.ok(ex.data.accessLog.some((a) => a.action === "view_profile"));
 
@@ -805,13 +858,14 @@ test("personal data: consent, viewer limits, export and removal (PR-06, FR-078)"
   const refused = await owner("POST", "/api/dealers/pd1/anonymise");
   assert.equal(refused.status, 409);
   assert.equal(refused.data.code, "retention");
-  await owner("PUT", "/api/c/dealers/pd2", { data: { name: "Lost Lena", stage: "lost", phone: "0918 222", email: "lena@example.com" } });
+  await owner("PUT", "/api/c/dealers/pd2", { data: { name: "Lost Lena", firstName: "Lost", lastName: "Lena", age: 41, gender: "female", stage: "lost", phone: "0918 222", email: "lena@example.com" } });
   await owner("PUT", "/api/c/interactions/pd-i2", { data: { dealerId: "pd2", kind: "visit", date: day(0), note: "Not interested" } });
   assert.equal((await owner("POST", "/api/dealers/pd2/anonymise")).status, 200);
   const gone = (await owner("GET", "/api/c/dealers")).data.find((d) => d.id === "pd2").data;
   assert.match(gone.name, /^Removed dealer/);
   assert.equal(gone.phone, undefined);
   assert.equal(gone.email, undefined);
+  for (const k of ["firstName", "middleName", "lastName", "age", "gender"]) assert.equal(gone[k], undefined, k);
   assert.ok(!(await owner("GET", "/api/c/interactions")).data.some((i) => i.id === "pd-i2"));
 });
 

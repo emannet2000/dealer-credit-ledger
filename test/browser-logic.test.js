@@ -80,6 +80,30 @@ test("a statement for a period carries the balance forward and lists what is unp
   same(st.ag.open.map((o) => o.tid), ["a", "b", "c"]);
 });
 
+test("dealer names keep first, middle and last parts, including compound surnames", () => {
+  const L = load(["splitName", "nameParts", "fullName"]);
+  same(L.splitName("Juana Dela Cruz"), { first: "Juana", middle: "", last: "Dela Cruz" });
+  same(L.splitName("Juana Santos Dela Cruz"), { first: "Juana", middle: "Santos", last: "Dela Cruz" });
+  same(L.splitName("Maria S. Dela Cruz"), { first: "Maria", middle: "S.", last: "Dela Cruz" });
+  same(L.splitName("Madonna"), { first: "Madonna", middle: "", last: "" });
+  same(L.nameParts({ firstName: "Ana", lastName: "Reyes", name: "Old Name" }), { first: "Ana", middle: "", last: "Reyes" });
+  assert.equal(L.fullName("  Ana ", "S.", "Reyes"), "Ana S. Reyes");
+});
+
+test("deep links open the right dealer, product or document", () => {
+  const L = load(["VIEWS", "DEEP_KINDS", "hashTarget"]);
+  same(L.hashTarget("#dealers"), { view: "dealers" });
+  same(L.hashTarget("#dealer/d1"), { kind: "dealer", id: "d1" });
+  same(L.hashTarget("#product/p%201"), { kind: "product", id: "p 1" });
+  same(L.hashTarget("#receipt/tx_9"), { kind: "receipt", id: "tx_9" });
+  same(L.hashTarget("#statement/d1"), { kind: "statement", id: "d1" });
+  same(L.hashTarget("#aging"), { kind: "aging" });
+  same(L.hashTarget("#aging/d1"), { kind: "aging", id: "d1" });
+  same(L.hashTarget("#summary"), { kind: "summary" });
+  assert.equal(L.hashTarget("#nonsense/x"), null);
+  assert.equal(L.hashTarget(""), null);
+});
+
 test("the payment form's allocation preview matches the chosen deliveries", () => {
   const L = load(["allocate"]);
   const open = [{ id: "a", t: { no: "DR-1" }, rem: 100 }, { id: "b", t: { no: "DR-2" }, rem: 200 }, { id: "c", t: { no: "DR-3" }, rem: 300 }];
@@ -88,4 +112,41 @@ test("the payment form's allocation preview matches the chosen deliveries", () =
   const chosen = L.allocate(open, 250, new Map([["c", 200]]));
   same(chosen.lines.map((l) => [l.id, l.amount, l.chosen]), [["a", 50, false], ["c", 200, true]]);
   assert.equal(L.allocate(open, 700).extra, 100, "more than owed is kept as credit");
+});
+
+test("the dealer form finds existing dealers by mobile, email and name", () => {
+  const L = load(["normText", "phoneKey", "sameWords", "oneEditApart", "nearText", "rankMatches", "findDealerMatches"]);
+  const dealers = new Map(Object.entries({
+    a: { name: "Juana Santos Dela Cruz", phone: "+63 917 123 4567", email: "Juana@Example.com" },
+    b: { name: "Peña Reyes", phone: "", active: false },
+    c: { name: "Removed person", phone: "0917 999 0000", anonymised: { at: 1 } },
+  }));
+  const find = (form, except) => L.findDealerMatches(dealers, form, except).map((m) => [m.id, m.strong, m.why.map((y) => y.what).join()]);
+  same(find({ phone: "0917-123-4567" }), [["a", true, "mobile number"]]);
+  same(find({ email: " juana@example.COM " }), [["a", true, "email"]]);
+  same(find({ name: "JUANA santos dela cruz" }), [["a", true, "name"]]);
+  same(find({ name: "Dela Cruz, Juana Santos" }), [["a", true, "name"]], "word order doesn't matter");
+  same(find({ name: "Pena Reyes" }), [["b", true, "name"]], "accents don't matter");
+  same(find({ name: "Juana Dela Cruz" }), [["a", false, "name"]], "missing middle name is only similar");
+  same(find({ name: "Juana Santos Dela Cruzz" }), [["a", false, "name"]], "one typo is only similar");
+  same(find({ name: "Pedro Dela Cruz", phone: "123" }), [], "other people and short numbers don't match");
+  same(find({ phone: "0917 999 0000" }), [], "anonymised records are skipped");
+  same(find({ name: "Juana Santos Dela Cruz" }, "a"), [], "a record doesn't match itself");
+});
+
+test("the product form finds existing products by code and name, without mixing up sizes", () => {
+  const L = load(["normText", "sameWords", "oneEditApart", "nearText", "rankMatches", "productWords", "findProductMatches"]);
+  const products = new Map(Object.entries({
+    a: { name: "Dishwashing Liquid 1L", code: "DW-100" },
+    b: { name: "Hand Soap", code: "" },
+  }));
+  const find = (form, except) => L.findProductMatches(products, form, except).map((m) => [m.id, m.strong]);
+  same(find({ code: "dw 100" }), [["a", true]]);
+  same(find({ name: "dishwashing liquid 1 l" }), [["a", true]], "1 L is the same size as 1L");
+  same(find({ name: "Dishwashing Liquid" }), [["a", false]], "a name without the size is only similar");
+  same(find({ name: "Dishwashng Liquid 1L" }), [["a", false]], "one typo is only similar");
+  same(find({ name: "Dishwashing Liquid 2L" }), [], "another size is a different product");
+  same(find({ name: "Soap" }), [], "one shared word isn't enough");
+  same(find({ code: "" }), [], "blank codes never match");
+  same(find({ name: "Dishwashing Liquid 1L" }, "a"), [], "a record doesn't match itself");
 });
