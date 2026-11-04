@@ -8,6 +8,11 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "test": "node --test test/*.test.js",
+    "test:unit": "node --test test/unit.test.js test/browser-logic.test.js",
+    "test:property": "node --test test/property.test.js",
+    "test:edge": "node --test test/edge.test.js",
+    "test:functional": "node --test test/api.test.js test/ops.test.js test/extras.test.js test/finance.test.js",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=lib/*.js test/*.test.js",
     "import": "node scripts/import-backup.js",
     "reset-password": "node scripts/reset-password.js",
     "restore": "node scripts/restore-db.js",
@@ -24,5 +29,8 @@
     "express": "^4.21.2",
     "qrcode": "^1.5.4",
     "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "fast-check": "^4.10.2"
   }
 }

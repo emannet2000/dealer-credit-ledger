@@ -157,7 +157,7 @@ function qrBlock(text,label){
   return `<div class="qr-block"><img src="${esc(qrUrl(text,170))}" alt="${esc(label)} QR code" width="170" height="170"><div class="small"><b>${esc(label)}</b><div class="muted">Scan with a phone camera to open it again.</div></div></div>`;
 }
 
-const S={me:null,dealer:null,txns:[],products:[],orders:[],proofs:[],settings:{},tab:"unpaid",q:"",cart:new Map()};
+const S={me:null,dealer:null,txns:[],products:[],orders:[],proofs:[],disputes:[],apps:[],settings:{},tab:"unpaid",q:"",cart:new Map()};
 try{ const c=JSON.parse(localStorage.getItem("portal-cart")||"[]"); S.cart=new Map(c); }catch(e){}
 const saveCart=()=>{ try{ localStorage.setItem("portal-cart",JSON.stringify([...S.cart])); }catch(e){} };
 const myPct=()=>{ const d=S.dealer||{}, s=S.settings; return d.discountPct!=null&&d.discountPct!==""?Number(d.discountPct):Number(s.discountPct??25); };
@@ -174,9 +174,9 @@ function compute(){
   const tx=live(), t0=today(), runAt=new Map(); let run=0;
   tx.forEach(t=>{ run=r2(run+txnEffect(t)); runAt.set(t,run); });
   const {open:queue,settled}=Credit.settleEntries(tx.map(t=>[t._id,t]));
-  const open=queue.map(q=>({...q,late:q.t.dueDate&&q.t.dueDate<t0?daysBetween(q.t.dueDate,t0):0}));
+  const due=Credit.dueSummary(queue,t0), open=queue.map(q=>{ const f=Credit.dueParts(q.t,q.rem)[0]; return {...q,late:f&&f.due&&f.due<t0?daysBetween(f.due,t0):0}; });
   const onTime=settled.filter(s=>!s.t.dueDate||s.paid<=s.t.dueDate).length;
-  return {balance:run,open,overdue:r2(open.filter(o=>o.late).reduce((a,o)=>a+o.rem,0)),maxLate:open.reduce((m,o)=>Math.max(m,o.late),0),
+  return {balance:run,open,overdue:due.overdue,maxLate:due.maxLate,
     nextDue:open.filter(o=>!o.late).sort((a,b)=>a.t.dueDate.localeCompare(b.t.dueDate))[0]||null,settled:settled.length,onTime,runAt,
     lastPay:tx.filter(t=>t.type==="payment").pop()||null};
 }
@@ -198,7 +198,7 @@ function render(){
   else if(c.overdue) html+=`<div class="notice warn"><b>${P(c.overdue)} is past due.</b> Please pay soon to keep your account in good standing.</div>`;
   if(s.paymentInfo) html+=`<section class="card"><div class="pay"><div><h3 style="font-size:16px">How to pay</h3><p>${esc(s.paymentInfo)}</p></div><button class="btn sm" id="copyPay" type="button">Copy</button></div>${s.phone?`<p class="small muted" style="margin:8px 0 0">Questions? Contact ${esc(s.storeName||"the store")}: ${esc(s.phone)}</p>`:""}</section>`;
   const openOrders=S.orders.filter(o=>["new","preparing","ready"].includes(o.status)).length;
-  const tabs=[["unpaid",`Unpaid (${c.open.length})`],["proof","Send proof"],["catalog","Order"],["orders",`My orders${openOrders?` (${openOrders})`:""}`],["history","History"],["account","Account"]];
+  const tabs=[["unpaid",`Unpaid (${c.open.length})`],["proof","Send proof"],["requests","Requests"],["catalog","Order"],["orders",`My orders${openOrders?` (${openOrders})`:""}`],["history","History"],["account","Account"]];
   html+=`<div class="tabs" role="tablist">${tabs.map(([k,l])=>`<button class="tab" role="tab" type="button" data-tab="${k}" aria-selected="${S.tab===k}">${l}</button>`).join("")}</div>`;
   if(S.tab==="unpaid") html+=c.open.length?`<div class="list">${c.open.slice().reverse().map(o=>`<button class="row" type="button" data-rc="${esc(o.t._id)}"><div><b>${esc(o.t.no||LABEL.sale)}</b><div class="small muted">Released ${fmtDate(o.t.date)} · due ${fmtDate(o.t.dueDate)}</div>${o.rem<o.t.amount-0.004?`<div class="small" style="color:var(--good)">${P(o.t.amount-o.rem)} of ${P(o.t.amount)} paid</div>`:""}</div><div class="r"><b class="num">${P(o.rem)}</b><div>${o.late?`<span class="pill bad">${o.late} days late</span>`:`<span class="pill neutral">Not yet due</span>`}</div></div></button>`).join("")}</div>`:`<div class="empty">You have no unpaid deliveries. Salamat po!</div>`;
   if(S.tab==="statement"){ const rows=live();
@@ -217,6 +217,18 @@ function render(){
       <button class="btn" id="pf-send" type="submit">Send to the store</button></form></section>
       ${list.length?`<div class="list">${list.map(p=>`<div class="row"><div><b>${P(p.amount)}</b><span class="small muted"> ${esc(p.method)}${p.ref?" · Ref "+esc(p.ref):""}</span>${p.reason?`<div class="small">${esc(p.reason)}</div>`:""}${p.txnNo?`<div class="small muted">Receipt ${esc(p.txnNo)}</div>`:""}</div><span class="pill ${P_L[p.status][1]}">${P_L[p.status][0]}</span></div>`).join("")}</div>`:""}`;
   }
+  if(S.tab==="requests"){ const D_L={open:["Being checked","neutral"],accepted:["Accepted","good"],rejected:["Not accepted","bad"]}, A_L={submitted:["Being reviewed","neutral"],approved:["Approved","good"],rejected:["Not approved","bad"]}, plans=S.txns.filter(t=>t.plan&&!t.voided);
+    if(plans.length) html+=`<section class="card"><h3 style="font-size:16px;margin-top:0">Your payment plan</h3>${plans.map(t=>{ const o=c.open.find(x=>x.t._id===t._id), parts=o?Credit.dueParts(t,o.rem):[]; return `<p class="small"><b>${esc(t.no||"")}</b>: ${parts.length?parts.map(p=>`${esc(p.due)} · ${P(p.amount)}`).join("<br>"):"Fully paid"}</p>`; }).join("")}</section>`;
+    html+=`<section class="card"><h3 style="font-size:16px;margin-top:0">Question a charge</h3><p class="small muted">While the store checks it, this amount doesn't count as overdue.</p>
+      <form id="dspForm"><label>Charge<select id="ds-t" required><option value="">Choose…</option>${c.open.filter(o=>!o.t.disputed).map(o=>`<option value="${esc(o.t._id)}">${esc(o.t.no||"")} · ${P(o.rem)}</option>`).join("")}</select></label>
+      <label>Reason<select id="ds-r"><option value="not received">Not received</option><option value="wrong quantity">Wrong quantity</option><option value="wrong price">Wrong price</option><option value="other">Other</option></select></label>
+      <label>Amount in question (₱)<input id="ds-a" type="number" inputmode="decimal" min="0.01" step="0.01" required></label><label>Details<textarea id="ds-n" maxlength="500"></textarea></label>
+      <label>Photo (optional)<input id="ds-f" type="file" accept="image/*"></label><button class="btn" id="ds-send" type="submit">Send</button></form></section>
+      ${S.disputes.length?`<div class="list">${S.disputes.slice().sort((a,b)=>b.openedAt-a.openedAt).map(x=>`<div class="row"><div><b>${esc(x.no)}</b> <span class="small muted">${P(x.amount)}</span>${x.resolution?`<div class="small">${esc(x.resolution)}</div>`:""}</div><span class="pill ${D_L[x.status][1]}">${D_L[x.status][0]}</span></div>`).join("")}</div>`:""}
+      <section class="card"><h3 style="font-size:16px;margin-top:0">Ask for a credit limit</h3><form id="appForm"><label>Limit you need (₱)<input id="ap-a" type="number" inputmode="decimal" min="1" step="1" required></label>
+      <label>References<textarea id="ap-r" maxlength="500" placeholder="Names and numbers of people who can vouch for you"></textarea></label><label>Supporting documents<input id="ap-f" type="file" accept="image/*" multiple></label><button class="btn" id="ap-send" type="submit">Apply</button></form></section>
+      ${S.apps.length?`<div class="list">${S.apps.slice().sort((a,b)=>b.submittedAt-a.submittedAt).map(x=>`<div class="row"><div><b>${P(x.approvedLimit||x.limit)}</b>${x.reason?`<div class="small">${esc(x.reason)}</div>`:""}</div><span class="pill ${A_L[x.status][1]}">${A_L[x.status][0]}</span></div>`).join("")}</div>`:""}`;
+  }
   if(S.tab==="catalog"){ const pct=d.discountPct!=null&&d.discountPct!==""?Number(d.discountPct):Number(s.discountPct??25); const q=S.q.toLowerCase();
     const list=S.products.filter(p=>!q||[p.name,p.code,p.category].join(" ").toLowerCase().includes(q)).sort((a,b)=>a.name.localeCompare(b.name));
     html+=`<label style="margin-bottom:12px">Search products<input id="q" type="search" value="${esc(S.q)}" placeholder="Name, code or category"></label>
@@ -225,7 +237,7 @@ function render(){
       ${list.length?`<div class="cat">${list.map(p=>`<div class="prod">${p.imageId?`<img src="/_blob/${encodeURIComponent(p.imageId)}" alt="" loading="lazy">`:`<div class="ph">No photo</div>`}<div class="t"><b>${esc(p.name)}</b>${promoOn(p)?`<span class="pill warn" style="align-self:flex-start">PROMO</span><span class="muted num"><s>SRP ${P(p.srp)}</s> ${P(p.promo.price)}</span>`:p.srp?`<span class="muted num">SRP ${P(p.srp)}</span>`:""}${p.srp||promoOn(p)?`<span class="num">Your price <b>${P(unitPrice(p)*(1-prodPct(p)/100))}</b></span>`:""}${p.available?`<span class="pill good" style="align-self:flex-start">Available</span>`:`<span class="pill neutral" style="align-self:flex-start">Out of stock</span>`}
         ${p.srp?(S.cart.get(p._id)?`<div class="qty"><button class="btn" type="button" data-q="-1" data-p="${esc(p._id)}" aria-label="One less ${esc(p.name)}">−</button><input class="num" type="number" min="0" inputmode="numeric" id="q-${esc(p._id)}" data-setq="${esc(p._id)}" value="${S.cart.get(p._id)}" aria-label="Quantity of ${esc(p.name)}"><button class="btn" type="button" data-q="1" data-p="${esc(p._id)}" aria-label="One more ${esc(p.name)}">+</button></div>`:`<button class="btn sm add" type="button" data-q="1" data-p="${esc(p._id)}">Add</button>`):""}</div></div>`).join("")}</div>`:`<div class="empty">No products found.</div>`}`; }
   if(S.tab==="orders"){ const list=S.orders.slice().sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
-    html+=list.length?`<div class="list">${list.map(o=>`<button class="row" type="button" data-ord="${esc(o._id)}"><div><b>${esc(o.no||"Order")}</b><div class="small muted">Placed ${new Date(o.createdAt).toLocaleDateString("en-PH",{month:"short",day:"numeric"})}${o.pickupDate?` · pickup ${fmtDate(o.pickupDate)}`:""} · ${(o.items||[]).reduce((a,i)=>a+i.qty,0)} pcs</div></div><div class="r"><b class="num">${P(o.amount)}</b><div><span class="pill ${ORD_C[o.status]}">${ORD_L[o.status]}</span></div></div></button>`).join("")}</div>`:`<div class="empty">No orders yet. Open the Order tab to send your first one.</div>`; }
+    html+=list.length?`<div class="list">${list.map(o=>`<button class="row" type="button" data-ord="${esc(o._id)}"><div><b>${esc(o.no||"Order")}</b><div class="small muted">Placed ${new Date(o.createdAt).toLocaleDateString("en-PH",{month:"short",day:"numeric"})}${o.pickupDate?` · pickup ${fmtDate(o.pickupDate)}`:""} · ${(o.items||[]).reduce((a,i)=>a+i.qty,0)} pcs</div></div><div class="r"><b class="num">${P(o.amount)}</b><div><span class="pill ${ORD_C[o.status]}">${ORD_L[o.status]}</span></div>${o.delivery?`<div class="small muted">${esc({scheduled:"Delivery scheduled",out:"Out for delivery",delivered:"Delivered",failed:"Delivery failed"}[o.delivery.status])} · ${esc(o.delivery.date)} · ${esc(o.delivery.driver)}${o.delivery.vehicle?" · "+esc(o.delivery.vehicle):""}</div>`:""}</div></button>`).join("")}</div>`:`<div class="empty">No orders yet. Open the Order tab to send your first one.</div>`; }
   if(S.tab==="account") html+=`<section class="card"><dl class="kv"><dt>Name</dt><dd>${esc(d.name)}</dd>${d.phone?`<dt>Mobile</dt><dd>${esc(d.phone)}</dd>`:""}${d.area?`<dt>Address</dt><dd>${esc(d.area)}</dd>`:""}${d.terms!=null?`<dt>Payment terms</dt><dd>${d.terms} days</dd>`:""}<dt>Username</dt><dd>${esc(S.me.username)}</dd></dl></section>
     <section class="card"><h3 style="font-size:16px;margin-bottom:10px">Change password</h3><form id="pw"><label>Current password<input id="pw1" type="password" autocomplete="current-password" required></label><label>New password<input id="pw2" type="password" autocomplete="new-password" minlength="8" required></label><button class="btn primary" type="submit">Change password</button></form></section>`;
   const act=document.activeElement, fid=act&&act.id, pos=act&&act.selectionStart;
@@ -300,6 +312,13 @@ document.addEventListener("click",e=>{
 });
 document.addEventListener("input",e=>{ if(e.target.id==="q"){ S.q=e.target.value; render(); } });
 document.addEventListener("change",e=>{ const pid=e.target.dataset&&e.target.dataset.setq; if(pid){ const q=Math.max(0,Math.round(Number(e.target.value)||0)); if(q) S.cart.set(pid,q); else S.cart.delete(pid); saveCart(); render(); } });
+const sendPhotos=async files=>{ const out=[]; for(const f of files){ const r=await fetch("/api/portal/proofs/photo",{method:"POST",credentials:"same-origin",headers:{"Content-Type":f.type},body:f}); const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(d.message||"That picture couldn't be uploaded."); out.push(d.id); } return out; };
+document.addEventListener("submit",async e=>{ if(e.target.id!=="dspForm"&&e.target.id!=="appForm") return; e.preventDefault(); const dsp=e.target.id==="dspForm", b=$(dsp?"#ds-send":"#ap-send"); b.disabled=true;
+  try{ const photos=await sendPhotos($(dsp?"#ds-f":"#ap-f").files);
+    if(dsp) await api("POST","/api/disputes",{txnId:$("#ds-t").value,reason:$("#ds-r").value,amount:Number($("#ds-a").value),note:$("#ds-n").value,photos});
+    else await api("POST","/api/creditapps",{limit:Number($("#ap-a").value),references:$("#ap-r").value,photos});
+    toast("Sent to the store"); document.activeElement.blur(); await load(); }
+  catch(err){ toast(err.message); b.disabled=false; } });
 document.addEventListener("submit",async e=>{ if(e.target.id!=="proofForm") return; e.preventDefault(); const b=$("#pf-send"); b.disabled=true; b.textContent="Sending…";
   try{ const photos=[]; for(const f of $("#pf-file").files){ const r=await fetch("/api/portal/proofs/photo",{method:"POST",credentials:"same-origin",headers:{"Content-Type":f.type},body:f}); const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(d.message||"That picture couldn't be uploaded."); photos.push(d.id); }
     await api("POST","/api/portal/proofs",{amount:Number($("#pf-amt").value),method:$("#pf-method").value,ref:$("#pf-ref").value,date:$("#pf-date").value,photos});
@@ -325,10 +344,10 @@ function openHash(){
 }
 async function load(){
   try{
-    const [me,dealers,txns,products,settings,orders,proofs]=await Promise.all([api("GET","/api/me"),api("GET","/api/c/dealers"),api("GET","/api/c/txns"),api("GET","/api/c/products"),api("GET","/api/c/settings"),api("GET","/api/c/orders"),api("GET","/api/c/proofs")]);
-    S.orders=orders.map(r=>({...r.data,_id:r.id})); S.proofs=proofs.map(r=>({...r.data,_id:r.id}));
+    const [me,dealers,txns,products,settings,orders,proofs,disputes,apps]=await Promise.all([api("GET","/api/me"),api("GET","/api/c/dealers"),api("GET","/api/c/txns"),api("GET","/api/c/products"),api("GET","/api/c/settings"),api("GET","/api/c/orders"),api("GET","/api/c/proofs"),api("GET","/api/c/disputes"),api("GET","/api/c/creditapps")]);
+    S.orders=orders.map(r=>({...r.data,_id:r.id})); S.proofs=proofs.map(r=>({...r.data,_id:r.id})); S.disputes=disputes.map(r=>({...r.data,_id:r.id})); S.apps=apps.map(r=>({...r.data,_id:r.id}));
     S.me=me; S.dealer=dealers[0]?dealers[0].data:null; S.txns=txns.map(r=>({...r.data,_id:r.id})); S.products=products.map(r=>({...r.data,_id:r.id})); for(const k of [...S.cart.keys()]) if(!S.products.find(p=>p._id===k)) S.cart.delete(k); S.settings=settings[0]?settings[0].data:{};
-    $("#sync").textContent="Updated "+new Date().toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"}); if(!(document.activeElement&&document.activeElement.closest("#proofForm"))) render();
+    $("#sync").textContent="Updated "+new Date().toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"}); if(!(document.activeElement&&document.activeElement.closest("#proofForm,#dspForm,#appForm"))) render();
     if(!hashOpened){ hashOpened=true; openHash(); }
   }catch(e){ $("#sync").textContent="Couldn't load your account. Check your internet connection."; }
 }

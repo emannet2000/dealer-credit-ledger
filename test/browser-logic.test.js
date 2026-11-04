@@ -60,7 +60,7 @@ test("aging puts each unpaid charge in one bucket and reconciles to the balance"
   const L = load(["AGE_B", "ageKey", "agingFor", "agingReport"], { txns, dealers: { d1: { name: "Ana" }, d2: { name: "Ben" }, d3: { name: "Cy" } } });
   const R = L.agingReport("2026-11-03", "");
   const ana = R.rows.find((r) => r.id === "d1"), ben = R.rows.find((r) => r.id === "d2");
-  same({ ...ana.b }, { current: 300, d30: 0, d60: 500, d90: 50, d90p: 600 });
+  same({ ...ana.b }, { current: 300, d30: 0, d60: 500, d90: 50, d90p: 600, disputed: 0 });
   assert.equal(ana.balance, 1450);
   assert.equal(ben.credit, 200);
   assert.equal(ben.balance, -200);

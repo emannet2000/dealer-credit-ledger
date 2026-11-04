@@ -2,7 +2,7 @@
    in Store. The server holds every rule (lib/ops.js); these screens show what it decides. */
 "use strict";
 (() => {
-const { lsGet, lsSet, S, $, $$, esc, P, fmtDate, fmtStamp, today, addDays, status, head, show, back, toast, errMsg, guarded, armed, render, activeDealers, r2, METHODS } = window.LedgerUI;
+const { history, lsGet, lsSet, S, $, $$, esc, P, fmtDate, fmtStamp, today, addDays, status, head, show, back, toast, errMsg, guarded, armed, render, activeDealers, r2, METHODS } = window.LedgerUI;
 const call = (m, u, b) => window.APP.call(m, u, b);
 const near = (a, b) => Math.abs(a - b) <= 0.004;
 const peso = (n) => (n > 0 ? "+" : n < 0 ? "−" : "") + P(Math.abs(n));
@@ -30,6 +30,9 @@ function notices() {
   const note = (cls, text, label, go) => out.push(`<div class="notice ${cls}"><p>${text}</p><button class="btn sm" data-act="${go}" type="button">${label}</button></div>`);
   if (days.length) note("warn", `<b>${days.length} day${days.length === 1 ? "" : "s"} not closed yet.</b> Oldest: ${fmtDate(days[0])}.`, "Close the day", "go-cash");
   if (proofs) note("info", `<b>${proofs} proof${proofs === 1 ? "" : "s"} of payment to check.</b>`, "Review", "go-cash");
+  const disputes = rows(S.disputes).filter(([, d]) => d.status === "open").length, apps = S.canAdmin ? rows(S.creditapps).filter(([, a]) => a.status === "submitted").length : 0;
+  if (disputes) note("warn", `<b>${disputes} disputed charge${disputes === 1 ? "" : "s"} to review.</b>`, "Review", "go-cash");
+  if (apps) note("info", `<b>${apps} credit application${apps === 1 ? "" : "s"} to review.</b>`, "Review", "go-cash");
   const voids = S.canAdmin ? rows(S.signoffs).filter(([, r]) => r.status === "pending").length : 0;
   if (voids) note("warn", `<b>${voids} void${voids === 1 ? "" : "s"} waiting for your approval.</b>`, "Review", "go-cash");
   if (remits) note("warn", `<b>${remits} remittance${remits === 1 ? "" : "s"} with a difference.</b>`, "Review", "go-cash");
@@ -117,9 +120,118 @@ function netProfitKpi(gross, [from, to]) {
   const spent = r2(expensesInRange(from, to).reduce((a, [, e]) => a + e.amount, 0)), net = r2(gross - spent);
   return `<div class="kpi ${net < 0 ? "bad" : "good"}"><div class="lbl">Net profit</div><div class="val num">${P(net)}</div><div class="sub">Gross profit less ${P(spent)} expenses</div></div>`;
 }
+/* ---------- payment plans, late fees, disputes, credit ---------- */
+const FREQ_L = { weekly: "Weekly", biweekly: "Every 2 weeks", monthly: "Monthly" };
+function planPanel() {
+  const list = rows(S.txns).filter(([, t]) => t.plan && !t.voided), t0 = today();
+  return panel("Payment plans", list.length ? table(`<th>Dealer</th><th>Plan</th><th class="r">Unpaid</th><th class="r">Next</th><th></th>`, list.map(([id, t]) => {
+    const o = status(t.dealerId).open.find((x) => x._id === id), parts = o ? Credit.dueParts(t, o.remaining) : [], late = parts.filter((p) => p.due < t0);
+    return `<tr><td><b>${esc(dealerName(t.dealerId))}</b><div class="small muted">${esc(t.no || "")}</div></td><td class="small">${t.plan.count} × ${esc(FREQ_L[t.plan.frequency])}${late.length ? ` <span class="pill bad">${late.length} missed</span>` : ""}</td><td class="r num">${P(o ? o.remaining : 0)}</td><td class="r small nowrap">${parts[0] ? `${fmtDate(parts[0].due)}<div class="num">${P(parts[0].amount)}</div>` : `<span class="pill good">Paid</span>`}</td><td class="r">${S.canAdmin ? `<button class="btn sm" data-act="ops-plan-end" data-id="${esc(id)}" type="button">Cancel</button>` : ""}</td></tr>`;
+  }).join("")) : none("No payment plans yet."), S.canAdmin ? `<button class="btn sm primary" data-act="ops-plan" type="button">+ Payment plan</button>` : "");
+}
+function planForm() {
+  const open = activeDealers().flatMap(([id, d]) => status(id).open.filter((o) => !o.plan && !o.disputed && o.type === "sale").map((o) => ({ o, d })));
+  if (!open.length) { toast("No unpaid deliveries to put on a plan."); return; }
+  show(() => [head("New payment plan", "Splits what is still unpaid. Only missed installments count as late.") + `<form id="f" class="form-grid">
+    <label class="f span">Delivery<select id="n-t" required><option value="">Choose…</option>${open.map(({ o, d }) => `<option value="${esc(o._id)}">${esc(d.name)} · ${esc(o.no || "")} · ${P(o.remaining)}</option>`).join("")}</select></label>
+    <label class="f">Installments<input id="n-c" type="number" min="2" max="60" step="1" required value="4"></label>
+    <label class="f">How often<select id="n-f">${Object.entries(FREQ_L).map(([k, l]) => `<option value="${k}" ${k === "monthly" ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+    <label class="f">First due date<input id="n-s" type="date" required value="${today()}"></label>
+    <div class="actions span"><button class="btn primary" type="submit">Create plan</button><button class="btn" type="button" data-back>Cancel</button></div></form>`, (sh) => {
+    $("#f", sh).addEventListener("submit", (e) => { e.preventDefault(); guarded(e.submitter, async () => { await call("POST", "/api/plans", { txnId: $("#n-t", sh).value, count: Number($("#n-c", sh).value), frequency: $("#n-f", sh).value, start: $("#n-s", sh).value }); toast("Payment plan created"); back(); }); });
+  }]);
+}
+function lateFeePanel() {
+  if (!S.canAdmin) return "";
+  const from = today().slice(0, 8) + "01", charged = r2(rows(S.txns).filter(([, t]) => t.lateFeeFor && !t.voided && t.date >= from).reduce((a, [, t]) => a + t.amount, 0));
+  return panel("Late fees", `<p class="small" style="margin-top:0">${S.settings.lateFee && S.settings.lateFee.ratePct ? `${S.settings.lateFee.ratePct}% a month after ${S.settings.lateFee.graceDays} grace days.` : "Set your late fee policy in Store first."} Charged this month: <b>${P(charged)}</b>, reported apart from sales.</p>`, `<button class="btn sm" data-act="ops-fees" type="button">Preview fees</button>`);
+}
+async function feesSheet() {
+  let list; try { list = await call("GET", "/api/latefees"); } catch (e) { toast(errMsg(e), "error"); return; }
+  show(() => [head("Late fees to charge", "Nothing is charged until you confirm.") + (list.length ? `<form id="f">${table(`<th></th><th>Dealer</th><th class="r">Unpaid</th><th class="r">Fee</th>`, list.map((f) => `<tr><td><input type="checkbox" data-f="${esc(f.txnId)}" checked aria-label="Charge ${esc(f.no)}"></td><td><b>${esc(f.dealerName)}</b><div class="small muted">${esc(f.no)}</div></td><td class="r num">${P(f.unpaid)}</td><td class="r num">${P(f.fee)}</td></tr>`).join(""))}<div class="actions" style="margin-top:12px"><button class="btn primary" type="submit">Charge selected fees</button><button class="btn" type="button" data-back>Cancel</button></div></form>` : `<div class="empty"><p>No late fees are due.</p></div>`), (sh) => {
+    const f = $("#f", sh); if (f) f.addEventListener("submit", (e) => { e.preventDefault(); guarded(e.submitter, async () => { const r = await call("POST", "/api/latefees/post", { txnIds: $$("[data-f]:checked", sh).map((c) => c.dataset.f) }); toast(`${r.posted.length} fee${r.posted.length === 1 ? "" : "s"} charged`); back(); }); });
+  }]);
+}
+const REASON_L = { "not received": "Not received", "wrong quantity": "Wrong quantity", "wrong price": "Wrong price", other: "Other" };
+function disputePanel() {
+  const list = rows(S.disputes).filter(([, d]) => d.status === "open").sort((a, b) => a[1].openedAt - b[1].openedAt), now = Date.now();
+  return panel(`Disputed charges${list.length ? ` <span class="pill warn">${list.length}</span>` : ""}`, list.length ? table(`<th>Dealer</th><th>Reason</th><th class="r">Amount</th><th class="r">Open</th><th></th>`, list.map(([id, d]) =>
+    `<tr><td><b>${esc(dealerName(d.dealerId))}</b><div class="small muted">${esc(d.no)}</div></td><td class="small">${esc(REASON_L[d.reason])}${d.note ? `<div class="muted">${esc(d.note)}</div>` : ""}${d.photos.map((a, i) => ` <a href="/_blob/${esc(a)}" target="_blank" rel="noopener">Photo ${i + 1}</a>`).join("")}</td><td class="r num">${P(d.amount)}</td><td class="r small">${Math.floor((now - d.openedAt) / 864e5)} days</td><td class="r"><div class="actions" style="justify-content:flex-end">${S.canAdmin ? `<button class="btn sm primary" data-act="ops-dsp-yes" data-id="${esc(id)}" type="button">Accept</button>` : ""}<button class="btn sm" data-act="ops-dsp-no" data-id="${esc(id)}" type="button">Reject</button></div></td></tr>`).join("")) : none("No charges are being disputed."), `<button class="btn sm" data-act="ops-dsp-new" type="button">+ Dispute</button>`);
+}
+function disputeForm() {
+  const open = activeDealers().flatMap(([id, d]) => status(id).open.filter((o) => !o.disputed).map((o) => ({ o, d })));
+  if (!open.length) { toast("No unpaid charges to dispute."); return; }
+  show(() => [head("Open a dispute", "For a dealer who asked you to check a charge. The amount stops counting as overdue.") + `<form id="f" class="form-grid">
+    <label class="f span">Charge<select id="q-t" required><option value="">Choose…</option>${open.map(({ o, d }) => `<option value="${esc(o._id)}" data-d="${esc(o.dealerId)}" data-a="${o.remaining}">${esc(d.name)} · ${esc(o.no || "")} · ${P(o.remaining)}</option>`).join("")}</select></label>
+    <label class="f">Reason<select id="q-r">${Object.entries(REASON_L).map(([k, l]) => `<option value="${k}">${l}</option>`).join("")}</select></label>
+    <label class="f">Disputed amount (₱)${num("q-a", "", "required")}</label>
+    <label class="f span">Note<textarea id="q-n" maxlength="500"></textarea></label>
+    <div class="actions span"><button class="btn primary" type="submit">Open dispute</button><button class="btn" type="button" data-back>Cancel</button></div></form>`, (sh) => {
+    const c = $("#q-t", sh); c.addEventListener("change", () => { const o = c.selectedOptions[0]; if (o.dataset.a) $("#q-a", sh).value = o.dataset.a; });
+    $("#f", sh).addEventListener("submit", (e) => { e.preventDefault(); guarded(e.submitter, async () => { await call("POST", "/api/disputes", { dealerId: c.selectedOptions[0].dataset.d, txnId: c.value, reason: $("#q-r", sh).value, amount: Number($("#q-a", sh).value), note: $("#q-n", sh).value }); toast("Dispute opened"); back(); }); });
+  }]);
+}
+function suggestLimit(id) {
+  const d = S.dealers.get(id), g = history(id).grade.g, k = { A: 1.25, B: 1.1, C: 1, New: 1 }[g] ?? 0.75;
+  return Math.round(((Number(d.creditLimit) || 0) * k) / 100) * 100;
+}
+function creditPanel() {
+  if (!S.canAdmin) return "";
+  const apps = rows(S.creditapps).filter(([, a]) => a.status === "submitted"), t0 = today(), soon = addDays(t0, 30);
+  const due = activeDealers().filter(([, d]) => d.nextReview && d.nextReview <= soon).sort((a, b) => a[1].nextReview.localeCompare(b[1].nextReview));
+  if (!apps.length && !due.length) return "";
+  return panel("Credit applications and reviews", `${apps.length ? table(`<th>Dealer</th><th class="r">Asked for</th><th class="r">Now</th><th></th>`, apps.map(([id, a]) => `<tr><td><b>${esc(dealerName(a.dealerId))}</b>${a.references ? `<div class="small muted">${esc(a.references)}</div>` : ""}${a.photos.map((f, i) => ` <a class="small" href="/_blob/${esc(f)}" target="_blank" rel="noopener">Document ${i + 1}</a>`).join("")}</td><td class="r num">${P(a.limit)}</td><td class="r num">${P((S.dealers.get(a.dealerId) || {}).creditLimit || 0)}</td><td class="r"><div class="actions" style="justify-content:flex-end"><button class="btn sm primary" data-act="ops-app-yes" data-id="${esc(id)}" type="button">Approve</button><button class="btn sm" data-act="ops-app-no" data-id="${esc(id)}" type="button">Reject</button></div></td></tr>`).join("")) : ""}
+    ${due.length ? table(`<th>Review due</th><th>Dealer</th><th class="r">Limit</th><th class="r">Suggested</th><th></th>`, due.map(([id, d]) => `<tr><td class="nowrap">${fmtDate(d.nextReview)}</td><td><b>${esc(d.name)}</b><div class="small muted">Grade ${esc(history(id).grade.g)}</div></td><td class="r num">${P(d.creditLimit || 0)}</td><td class="r num">${P(suggestLimit(id))}</td><td class="r"><button class="btn sm" data-act="ops-review" data-id="${esc(id)}" type="button">Review</button></td></tr>`).join("")) : ""}`);
+}
+function limitSheet(title, start, go) {
+  show(() => [head(title) + `<form id="f" class="form-grid"><label class="f">Credit limit (₱)${num("l-a", start, "required")}</label><label class="f">Next review<input id="l-n" type="date" required value="${addDays(today(), 180)}"></label><div class="actions span"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-back>Cancel</button></div></form>`, (sh) => {
+    $("#f", sh).addEventListener("submit", (e) => { e.preventDefault(); guarded(e.submitter, async () => { await go(Number($("#l-a", sh).value), $("#l-n", sh).value); toast("Credit limit saved"); back(); }); });
+  }]);
+}
+/* ---------- delivery ---------- */
+const DEL_L = { scheduled: "Scheduled", out: "Out for delivery", delivered: "Delivered", failed: "Failed" };
+const DEL_C = { scheduled: "neutral", out: "warn", delivered: "good", failed: "bad" };
+function deliveryBlock(id, o) {
+  if (o.status !== "released") return "";
+  const v = o.delivery, log = (o.deliveryLog || []).slice().reverse();
+  return `<h3 style="font-size:14px;margin:16px 0 8px">Delivery</h3>${v ? `<p class="small" style="margin-top:0"><span class="pill ${DEL_C[v.status]}">${DEL_L[v.status]}</span> ${esc(v.driver)}${v.vehicle ? " · " + esc(v.vehicle) : ""} · ${fmtDate(v.date)}${v.remarks ? `<br>${esc(v.remarks)}` : ""}</p>` : `<p class="small muted" style="margin-top:0">Not recorded yet.</p>`}
+    ${S.canWrite ? `<button class="btn sm" data-act="ops-deliver" data-id="${esc(id)}" type="button">${v ? "Update delivery" : "Record delivery"}</button>` : ""}
+    ${log.length > 1 ? `<ul class="small muted">${log.map((l) => `<li>${fmtStamp(l.at)}: ${DEL_L[l.status]} · ${esc(l.byName || "")}</li>`).join("")}</ul>` : ""}`;
+}
+function deliveryForm(id) {
+  const v = (S.orders.get(id) || {}).delivery || {};
+  show(() => [head("Delivery") + `<form id="f" class="form-grid">
+    <label class="f">Driver<input id="w-d" required maxlength="80" value="${esc(v.driver || "")}"></label><label class="f">Vehicle<input id="w-v" maxlength="40" value="${esc(v.vehicle || "")}"></label>
+    <label class="f">Date<input id="w-t" type="date" required value="${esc(v.date || today())}"></label><label class="f">Status<select id="w-s">${Object.entries(DEL_L).map(([k, l]) => `<option value="${k}" ${v.status === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+    <label class="f span">Remarks<textarea id="w-r" maxlength="300">${esc(v.remarks || "")}</textarea></label>
+    <div class="actions span"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-back>Cancel</button></div></form>`, (sh) => {
+    $("#f", sh).addEventListener("submit", (e) => { e.preventDefault(); guarded(e.submitter, async () => { await call("POST", `/api/orders/${id}/delivery`, { driver: $("#w-d", sh).value, vehicle: $("#w-v", sh).value, date: $("#w-t", sh).value, status: $("#w-s", sh).value, remarks: $("#w-r", sh).value }); toast("Delivery saved"); back(); }); });
+  }]);
+}
+/* ---------- expiry ---------- */
+function expiryPanel() {
+  const t0 = today(), soon = addDays(t0, Number(S.settings.expiryDays) || 60), list = rows(S.products).flatMap(([, p]) => (p.batches || []).filter((b) => b.expiry && b.expiry <= soon).map((b) => ({ p, b }))).sort((a, b) => a.b.expiry.localeCompare(b.b.expiry));
+  if (!list.length) return "";
+  return panel("Expiring stock", table(`<th>Product</th><th>Lot</th><th>Expiry</th><th class="r">Qty</th>`, list.map(({ p, b }) => `<tr><td><b>${esc(p.name)}</b></td><td class="small">${esc(b.lot)}</td><td class="nowrap">${fmtDate(b.expiry)} ${b.expiry < t0 ? `<span class="pill bad">Expired</span>` : `<span class="pill warn">Soon</span>`}</td><td class="r num">${b.qty}</td></tr>`).join("")));
+}
+/* ---------- tax ---------- */
+function taxHead(t) {
+  const x = S.settings.tax;
+  if (!x || !(x.tin || x.vatRegistered) || !["sale", "return"].includes(t.type)) return "";
+  return `<p class="small" style="margin:6px 0">${x.tin ? `TIN ${esc(x.tin)}` : ""}${x.vatRegistered ? " · VAT registered" : " · Non-VAT"}${x.permit ? ` · Permit ${esc(x.permit)}` : ""}${t.invoiceNo ? ` · Invoice <b>${esc(t.invoiceNo)}</b>` : ""}${x.series && x.series.atp ? ` · ATP ${esc(x.series.atp)}` : ""}</p>
+    ${t.tax ? `<p class="small" style="margin:6px 0">VATable sales ${P(t.tax.vatable)} · VAT 12% ${P(t.tax.vat)}${t.tax.exempt ? ` · VAT-exempt ${P(t.tax.exempt)}` : ""}${t.tax.zero ? ` · Zero-rated ${P(t.tax.zero)}` : ""}</p>` : ""}
+    ${t.invoiceNo ? "" : `<p class="small" style="margin:6px 0"><b>This is not an official receipt.</b></p>`}`;
+}
+function taxPanel([from, to]) {
+  if (!S.canAdmin || !(S.settings.tax && S.settings.tax.vatRegistered)) return "";
+  const months = new Map();
+  S.txns.forEach((t) => { if (!t.tax || t.voided || t.date < from || t.date > to) return; const m = months.get(t.date.slice(0, 7)) || { vatable: 0, vat: 0, exempt: 0, zero: 0 }, k = t.type === "return" ? -1 : 1; for (const f of Object.keys(m)) m[f] = r2(m[f] + k * t.tax[f]); months.set(t.date.slice(0, 7), m); });
+  const list = [...months].sort((a, b) => a[0].localeCompare(b[0]));
+  return `<div style="margin-bottom:20px">${panel("Tax summary", list.length ? table(`<th>Month</th><th class="r">VATable</th><th class="r">VAT</th><th class="r">Exempt</th><th class="r">Zero-rated</th>`, list.map(([m, v]) => `<tr><td>${esc(m)}</td><td class="r num">${P(v.vatable)}</td><td class="r num">${P(v.vat)}</td><td class="r num">${P(v.exempt)}</td><td class="r num">${P(v.zero)}</td></tr>`).join("")) : none("No taxed sales in this period."), list.length ? `<button class="btn sm" data-act="ops-tax-csv" type="button">Export CSV</button>` : "")}</div>`;
+}
 function vCash() {
   if (!S.canWrite) return panel("Cash", none("Daily cash work is for the store team."));
-  return `<div class="stack">${S.acct && S.acct.collector ? myRoute() : ""}${signoffPanel()}${remitPanel()}<div class="grid2e"><div class="stack">${closePanel()}${expensePanel()}</div><div class="stack">${proofPanel()}${checkPanel()}</div></div>${collectorReport()}</div>`;
+  return `<div class="stack">${S.acct && S.acct.collector ? myRoute() : ""}${signoffPanel()}${remitPanel()}${creditPanel()}<div class="grid2e"><div class="stack">${closePanel()}${expensePanel()}${lateFeePanel()}</div><div class="stack">${proofPanel()}${disputePanel()}${checkPanel()}${planPanel()}</div></div>${collectorReport()}</div>`;
 }
 
 async function closeDay(date) {
@@ -172,7 +284,7 @@ function vBuying() {
     return `<tr><td><b>${esc(p.no)}</b></td><td>${esc((S.suppliers.get(p.supplierId) || {}).name || "")}</td><td class="nowrap">${fmtDate(p.date)}</td><td><span class="pill ${PO_C[p.status]}">${PO_L[p.status]}</span></td><td class="r num">${p.status === "cancelled" ? "—" : left}</td><td class="r"><div class="actions" style="justify-content:flex-end">${open ? `<button class="btn sm primary" data-act="ops-receive" data-id="${esc(id)}" type="button">Receive</button>` : ""}${S.canAdmin && ["draft", "ordered"].includes(p.status) ? `<button class="btn sm" data-act="ops-po" data-id="${esc(id)}" type="button">Edit</button>` : ""}</div></td></tr>`;
   }).join("")) : none("No purchase orders yet."), S.canAdmin ? `<button class="btn sm primary" data-act="ops-po" type="button">+ Purchase order</button>` : "")}
   ${bills.length ? panel(`Supplier invoices${owed ? ` <span class="small muted">You owe ${P(owed)}</span>` : ""}`, table(`<th>Invoice</th><th>Supplier</th><th>Due</th><th class="r">Amount</th><th class="r">Unpaid</th><th></th>`, bills.map(({ id, p, i, inv }) => `<tr><td><b>${esc(inv.no)}</b><div class="small muted">${esc(p.no)}</div></td><td>${esc((S.suppliers.get(p.supplierId) || {}).name || "")}</td><td class="nowrap">${inv.dueDate ? fmtDate(inv.dueDate) : "—"}${left(inv) > 0 && inv.dueDate && inv.dueDate < t0 ? ` <span class="pill bad">Overdue</span>` : ""}</td><td class="r num">${P(inv.amount)}</td><td class="r num">${left(inv) > 0 ? P(left(inv)) : `<span class="pill good">Paid</span>`}</td><td class="r">${S.canAdmin && left(inv) > 0 ? `<button class="btn sm" data-act="ops-bill" data-id="${esc(id)}" data-i="${i}" type="button">Pay</button>` : ""}</td></tr>`).join(""))) : ""}
-  ${locationPanel()}
+  ${expiryPanel()}${locationPanel()}
   ${panel("Suppliers", `<div class="actions" style="margin-bottom:10px"><input id="sup-q" type="search" placeholder="Search suppliers" aria-label="Search suppliers" value="${esc(S.supQ || "")}" style="flex:1;min-width:160px"><label class="chk"><input type="checkbox" data-act="ops-sup-all" ${S.supAll ? "checked" : ""}> Show archived</label></div>
     ${sup.length ? table(`<th>Supplier</th><th>Contact</th><th class="r">Terms</th><th></th>`, sup.map(([id, s]) => `<tr><td><b>${esc(s.name)}</b>${s.active === false ? ` <span class="pill neutral">Archived</span>` : ""}</td><td class="small">${esc(s.contact)}${s.phone ? ` · ${esc(s.phone)}` : ""}</td><td class="r num">${s.terms} days</td><td class="r">${S.canAdmin ? `<button class="btn sm" data-act="ops-sup" data-id="${esc(id)}" type="button">Edit</button>` : ""}</td></tr>`).join("")) : none("No suppliers to show.")}`, S.canAdmin ? `<button class="btn sm primary" data-act="ops-sup" type="button">+ Supplier</button>` : "")}</div>`;
 }
@@ -259,13 +371,13 @@ function receiveForm(id) {
   show(() => [head(`Receive ${esc(p.no)}`, "Enter what actually arrived. The rest stays outstanding.") + `<form id="f" class="form-grid">
     <label class="f">Date received<input id="g-date" type="date" required max="${today()}" value="${today()}"></label>
     <label class="f">Delivery reference<input id="g-ref" maxlength="80"></label>
-    ${open.map((l) => `<label class="f span">${esc(l.name)}<span class="hint">Outstanding ${l.qty - (l.received || 0)}</span><input type="number" min="0" max="${l.qty - (l.received || 0)}" step="1" data-p="${esc(l.productId)}" value="${l.qty - (l.received || 0)}"></label>`).join("")}
+    ${open.map((l) => `<label class="f span">${esc(l.name)}<span class="hint">Outstanding ${l.qty - (l.received || 0)}</span><input type="number" min="0" max="${l.qty - (l.received || 0)}" step="1" data-p="${esc(l.productId)}" value="${l.qty - (l.received || 0)}"></label>${(S.products.get(l.productId) || {}).batchTracked ? `<label class="f">Lot number<input data-lot="${esc(l.productId)}" required maxlength="40"></label><label class="f">Expiry date<input data-exp="${esc(l.productId)}" type="date" required></label>` : ""}`).join("")}
     <h3 class="span form-sec">Supplier invoice (optional)</h3>
     <label class="f">Invoice no.<input id="g-inv" maxlength="80"></label>
     <label class="f">Amount (₱)${num("g-amt")}</label>
     <label class="f">Due date<input id="g-due" type="date"></label>
     <div class="actions span"><button class="btn primary" type="submit">Receive goods</button><button class="btn" type="button" data-back>Cancel</button></div></form>`, (sh) => {
-    $("#f", sh).addEventListener("submit", (e) => { e.preventDefault(); const lines = $$("[data-p]", sh).map((i) => ({ productId: i.dataset.p, qty: Number(i.value) || 0 }));
+    $("#f", sh).addEventListener("submit", (e) => { e.preventDefault(); const lines = $$("[data-p]", sh).map((i) => { const pid = i.dataset.p, lot = $(`[data-lot="${pid}"]`, sh), ex = $(`[data-exp="${pid}"]`, sh); return { productId: pid, qty: Number(i.value) || 0, lot: lot ? lot.value : undefined, expiry: ex ? ex.value : undefined }; });
       guarded(e.submitter, async () => { await call("POST", `/api/purchases/${id}/receive`, { date: $("#g-date", sh).value, ref: $("#g-ref", sh).value, lines, invoice: { no: $("#g-inv", sh).value, amount: Number($("#g-amt", sh).value) || 0, dueDate: $("#g-due", sh).value } }); toast("Goods received and stock updated"); back(); }); });
   }]);
 }
@@ -301,6 +413,25 @@ function controlsPanel() {
   const c = { voidOver: 1000, discountOverPct: 10, ...(S.settings.controls || {}) };
   return panel("Staff limits", `<p class="small" style="margin-top:0">Above these, staff send the action to you for approval. Leave a box blank for no limit.</p><form id="ctlForm" class="form-grid">
     <label class="f">Voids from (₱)${num("ct-void", c.voidOver ?? "")}</label><label class="f">Discounts over (%)${num("ct-disc", c.discountOverPct ?? "")}</label>
+    <div class="actions span"><button class="btn sm primary" type="submit">Save</button></div></form>`);
+}
+function moneyPanel() {
+  if (!S.canAdmin) return "";
+  const s = S.settings, f = s.lateFee || {}, x = s.tax || {}, r = x.series || {}, used = !!x.lastInvoice;
+  return panel("Fees, costing and tax", `<form id="finForm" class="form-grid">
+    <h3 class="span form-sec">Late fee policy</h3>
+    <label class="f">Rate a month (%)${num("fn-rate", f.ratePct ?? "")}</label><label class="f">Grace days<input id="fn-grace" type="number" min="0" step="1" value="${esc(f.graceDays ?? 0)}"></label>
+    <label class="f">Method<select id="fn-comp"><option value="simple">Simple</option><option value="monthly" ${f.compounding === "monthly" ? "selected" : ""}>Compounded monthly</option></select></label>
+    <h3 class="span form-sec">Stock</h3>
+    <label class="f">Costing method<select id="fn-cost">${[["latest", "Latest purchase cost"], ["average", "Weighted average"], ["fifo", "FIFO"]].map(([v, l]) => `<option value="${v}" ${(s.costing || "latest") === v ? "selected" : ""}>${l}</option>`).join("")}</select><span class="hint">Pick one and keep it: changing it mid-year makes profit figures hard to compare.</span></label>
+    <label class="f">Sell lots by<select id="fn-batch"><option value="fefo">Earliest expiry first</option><option value="fifo" ${s.batchRule === "fifo" ? "selected" : ""}>Oldest received first</option></select></label>
+    <h3 class="span form-sec">Tax details</h3>
+    <label class="f">TIN<input id="fn-tin" maxlength="30" value="${esc(x.tin || "")}"></label><label class="f">Business permit<input id="fn-permit" maxlength="60" value="${esc(x.permit || "")}"></label>
+    <label class="chk span"><input type="checkbox" id="fn-vat" ${x.vatRegistered ? "checked" : ""}> VAT registered (prices include 12% VAT)</label>
+    <h3 class="span form-sec">Registered invoice series</h3>
+    <label class="f">Prefix<input id="fn-pre" maxlength="10" value="${esc(r.prefix || "")}" placeholder="e.g. SI" ${used ? "disabled" : ""}></label><label class="f">ATP number<input id="fn-atp" maxlength="60" value="${esc(r.atp || "")}" ${used ? "disabled" : ""}></label>
+    <label class="f">From<input id="fn-from" type="number" min="1" step="1" value="${esc(r.from ?? 1)}" ${used ? "disabled" : ""}></label><label class="f">To<input id="fn-to" type="number" min="1" step="1" value="${esc(r.to ?? "")}" ${used ? "disabled" : ""}></label>
+    <p class="small muted span" style="margin:0">${used ? `Last used: ${esc(r.prefix)}-${String(x.lastInvoice).padStart(6, "0")}. A series can't change once in use.` : "Leave blank until the BIR has approved your series. Until then, receipts say they aren't official."}</p>
     <div class="actions span"><button class="btn sm primary" type="submit">Save</button></div></form>`);
 }
 const gb = (n) => (n / 1e9).toFixed(1) + " GB", mb = (n) => (n / 1e6).toFixed(1) + " MB";
@@ -344,7 +475,7 @@ function passwordPanel(owner) {
   const list = S.pwRequests || [];
   return list.length ? `<div class="stack" style="margin-bottom:16px">${panel("Forgot password", table(`<th>Person</th><th>Asked</th><th></th>`, list.map((r) => `<tr><td><b>${esc(r.name)}</b><div class="small muted">${esc(r.username)}</div></td><td class="small">${fmtStamp(r.at)}</td><td class="r"><button class="btn sm" data-act="edit-user" data-id="${esc(r.id)}" type="button">Set new password</button></td></tr>`).join("")))}</div>` : "";
 }
-const storePanels = () => { if (S.canAdmin && !S.healthAsked) { S.healthAsked = true; loadHealth(); } return `<div class="stack" style="margin-bottom:16px">${booksPanel()}${controlsPanel()}${reminderPanel()}${routePanel()}${devicePanel()}${healthPanel()}</div>`; };
+const storePanels = () => { if (S.canAdmin && !S.healthAsked) { S.healthAsked = true; loadHealth(); } return `<div class="stack" style="margin-bottom:16px">${booksPanel()}${controlsPanel()}${moneyPanel()}${reminderPanel()}${routePanel()}${devicePanel()}${healthPanel()}</div>`; };
 const loadHealth = () => call("GET", "/api/status").then((h) => { S.health = h; render(); }, () => {});
 /* ---------- barcode scanning: a USB scanner types into the box; a phone uses its camera ---------- */
 async function scanInto(sel) {
@@ -377,6 +508,7 @@ document.addEventListener("submit", (e) => {
     const days = $("#rm-days").value.split(/[,\s]+/).map((x) => Number(x.replace("−", "-"))).filter((n) => Number.isInteger(n));
     guarded(e.submitter, async () => { await window.LedgerUI.saveStore({ reminders: { enabled: $("#rm-on").checked, days }, reminderAuto: $("#rm-msg").value.trim() }); toast("Reminder settings saved"); });
   }
+  if (e.target.id === "finForm") { e.preventDefault(); guarded(e.submitter, async () => { await window.LedgerUI.saveStore({ lateFee: { ratePct: $("#fn-rate").value, graceDays: $("#fn-grace").value, compounding: $("#fn-comp").value }, costing: $("#fn-cost").value, batchRule: $("#fn-batch").value, tax: { tin: $("#fn-tin").value, permit: $("#fn-permit").value, vatRegistered: $("#fn-vat").checked, series: { prefix: $("#fn-pre").value, atp: $("#fn-atp").value, from: $("#fn-from").value, to: $("#fn-to").value } } }); toast("Settings saved"); }); }
   if (e.target.id === "ctlForm") { e.preventDefault(); guarded(e.submitter, async () => { await window.LedgerUI.saveStore({ controls: { voidOver: $("#ct-void").value, discountOverPct: $("#ct-disc").value } }); toast("Staff limits saved"); }); }
   if (e.target.id === "routeForm") { e.preventDefault(); const area = $("#rt-area").value, who = $("#rt-who").value;
     guarded(e.submitter, async () => { const list = activeDealers().filter(([, d]) => (d.area || "").trim() === area); for (const [id] of list) await call("PATCH", "/api/c/dealers/" + id, { data: { collectorId: who } }); toast(`${list.length} dealer${list.length === 1 ? "" : "s"} assigned`); });
@@ -393,6 +525,15 @@ const actions = (a, id) => ({
   "ops-check-bad": () => reasonSheet("Bounced check", "This reverses the payment, so the dealer owes that amount again.", "Reason", (reason, sh) => call("POST", `/api/checks/${id}/bounce`, { reason, fee: Number($("#b-fee", sh).value) || 0 }), `<label class="f span">Bounce fee (₱, optional)${num("b-fee")}</label>`),
   "ops-proof-ok": () => { if (armed(a, "Tap to approve")) guarded(a, async () => { const r = await call("POST", `/api/proofs/${id}/approve`, {}); toast(`Payment ${r.no} recorded`); }); },
   "ops-proof-no": () => reasonSheet("Reject proof of payment", "The dealer sees this reason.", "Reason", (reason) => call("POST", `/api/proofs/${id}/reject`, { reason })),
+  "ops-plan": planForm, "ops-plan-end": () => { if (armed(a, "Tap to cancel")) guarded(a, async () => { await call("POST", `/api/plans/${id}/cancel`, {}); toast("Payment plan cancelled"); }); },
+  "ops-fees": feesSheet, "ops-dsp-new": disputeForm,
+  "ops-dsp-yes": () => reasonSheet("Accept dispute", "This credits the dealer's balance with the disputed amount.", "Decision the dealer sees", (note) => call("POST", `/api/disputes/${id}/resolve`, { outcome: "accepted", note })),
+  "ops-dsp-no": () => reasonSheet("Reject dispute", "The amount counts as due again.", "Decision the dealer sees", (note) => call("POST", `/api/disputes/${id}/resolve`, { outcome: "rejected", note })),
+  "ops-app-yes": () => limitSheet("Approve credit application", S.creditapps.get(id).limit, (limit, nextReview) => call("POST", `/api/creditapps/${id}/approve`, { limit, nextReview })),
+  "ops-app-no": () => reasonSheet("Reject application", "The dealer sees this reason.", "Reason", (reason) => call("POST", `/api/creditapps/${id}/reject`, { reason })),
+  "ops-review": () => limitSheet(`Review ${esc(dealerName(id))}`, suggestLimit(id), (limit, nextReview) => call("POST", `/api/dealers/${id}/review`, { limit, nextReview })),
+  "ops-deliver": () => deliveryForm(id),
+  "ops-tax-csv": () => window.LedgerUI.exportTax(),
   "ops-exp": () => expenseForm(id), "ops-bill": () => billForm(id, Number(a.dataset.i)), "ops-merge": () => mergeForm(a.dataset.kind, id), "ops-move": moveForm,
   "ops-loc": () => reasonSheet("New location", "A warehouse, van or collector who holds stock.", "Name", (name) => call("PUT", "/api/c/locations/" + window.APP.newId(), { data: { name } })),
   "ops-so-ok": () => { if (armed(a, "Tap to approve")) guarded(a, async () => { await call("POST", `/api/signoffs/${id}/approve`, {}); toast("Record voided"); }); },
@@ -405,5 +546,5 @@ const actions = (a, id) => ({
   "ops-rem-run": () => guarded(a, async () => { const r = await call("POST", "/api/reminders/run", {}); toast(`${r.sent} sent, ${r.failed} failed`, r.failed ? "error" : undefined); }),
 })[a.dataset.act];
 
-window.LedgerOps = { views: { cash: vCash, buying: vBuying }, actions, notices, storePanels, passwordPanel, netProfitKpi };
+window.LedgerOps = { views: { cash: vCash, buying: vBuying }, actions, notices, storePanels, passwordPanel, netProfitKpi, deliveryBlock, taxHead, taxPanel };
 })();

@@ -283,19 +283,19 @@ test("automatic backup writes a database copy", async () => {
 test("adjustments and write-offs change the balance and are admin-only", async () => {
   await owner("PUT", "/api/c/dealers/ad1", { data: { name: "Adjust Dealer", creditLimit: 10000, terms: 30 } });
   await owner("PUT", "/api/c/txns/ads1", { data: { type: "sale", dealerId: "ad1", date: day(0), dueDate: day(30), items: [], amount: 1000 } });
-  assert.equal((await staff("PUT", "/api/c/txns/ada1", { data: { type: "adjustment", dealerId: "ad1", direction: "debit", amount: 10, reason: "test" } })).status, 403);
-  assert.equal((await staff("PUT", "/api/c/txns/adw1", { data: { type: "writeoff", dealerId: "ad1", amount: 10, reason: "test" } })).status, 403);
-  const debit = await owner("PUT", "/api/c/txns/ada1", { data: { type: "adjustment", dealerId: "ad1", direction: "debit", amount: 200, reason: "Freight" } });
+  assert.equal((await staff("PUT", "/api/c/txns/ada1", { data: { type: "adjustment", date: day(0), dealerId: "ad1", direction: "debit", amount: 10, reason: "test" } })).status, 403);
+  assert.equal((await staff("PUT", "/api/c/txns/adw1", { data: { type: "writeoff", date: day(0), dealerId: "ad1", amount: 10, reason: "test" } })).status, 403);
+  const debit = await owner("PUT", "/api/c/txns/ada1", { data: { type: "adjustment", date: day(0), dealerId: "ad1", direction: "debit", amount: 200, reason: "Freight" } });
   assert.equal(debit.status, 200);
   assert.equal(debit.data.data.no, "ADJ-00001");
-  const credit = await owner("PUT", "/api/c/txns/ada2", { data: { type: "adjustment", dealerId: "ad1", direction: "credit", amount: 50, reason: "Goodwill" } });
+  const credit = await owner("PUT", "/api/c/txns/ada2", { data: { type: "adjustment", date: day(0), dealerId: "ad1", direction: "credit", amount: 50, reason: "Goodwill" } });
   assert.equal(credit.status, 200);
   assert.equal(credit.data.data.no, "ADJ-00002");
-  const wo = await owner("PUT", "/api/c/txns/adw1", { data: { type: "writeoff", dealerId: "ad1", amount: 300, reason: "Unreachable" } });
+  const wo = await owner("PUT", "/api/c/txns/adw1", { data: { type: "writeoff", date: day(0), dealerId: "ad1", amount: 300, reason: "Unreachable" } });
   assert.equal(wo.status, 200);
   assert.equal(wo.data.data.no, "WO-00001");
-  assert.equal((await owner("PUT", "/api/c/txns/adx1", { data: { type: "adjustment", dealerId: "ad1", amount: 5, reason: "no direction" } })).status, 400);
-  assert.equal((await owner("PUT", "/api/c/txns/adx2", { data: { type: "writeoff", dealerId: "ad1", amount: 5 } })).status, 400);
+  assert.equal((await owner("PUT", "/api/c/txns/adx1", { data: { type: "adjustment", date: day(0), dealerId: "ad1", amount: 5, reason: "no direction" } })).status, 400);
+  assert.equal((await owner("PUT", "/api/c/txns/adx2", { data: { type: "writeoff", date: day(0), dealerId: "ad1", amount: 5 } })).status, 400);
   const tx = (await owner("GET", "/api/c/txns")).data.filter((t) => t.data.dealerId === "ad1").map((t) => t.data);
   assert.equal(tx.reduce((a, t) => a + txnEffect(t), 0), 850, "sale 1000 + debit 200 − credit 50 − write-off 300");
   const voided = { ...wo.data.data, voided: true };

@@ -211,6 +211,54 @@ test("close the books from the Store tab", { skip }, async () => {
   assert.deepEqual(b.errors, []);
 });
 
+test("put a charge on a payment plan and post a dispute from the Cash tab", { skip }, async () => {
+  await app.api("owner", "PUT", "/api/c/dealers/plan", { data: { name: "Plan Paula", terms: 30, creditLimit: 5000, active: true } });
+  await app.api("owner", "PUT", "/api/c/txns/plan-s", { data: { type: "sale", opening: true, dealerId: "plan", date: day(-40), dueDate: day(-10), amount: 900, no: "DR-07777" } });
+  await b.signIn(app.base, app.jar.owner);
+  await b.click(".tab[data-view=cash]");
+  await b.click("[data-act=ops-plan]");
+  await b.fill("#n-t", "plan-s"); await b.fill("#n-c", "3"); await b.fill("#n-s", day(10));
+  await b.click("#f button[type=submit]");
+  await b.waitFor("/3 × Monthly/.test(document.querySelector('#main').innerText)");
+  await b.click("[data-act=ops-dsp-new]");
+  await b.fill("#q-t", "plan-s"); await b.fill("#q-a", "100");
+  await b.click("#f button[type=submit]");
+  await b.waitFor("document.querySelector('[data-act=ops-dsp-yes]')");
+  await b.click("[data-act=ops-dsp-yes]");
+  await b.fill("#r-why", "Price corrected");
+  await b.click("#f button[type=submit]");
+  await b.waitFor("/No charges are being disputed/.test(document.querySelector('#main').innerText)");
+  assert.deepEqual(b.errors, []);
+});
+
+test("set tax details and print a VAT breakdown on the receipt", { skip }, async () => {
+  await b.signIn(app.base, app.jar.owner);
+  await b.click(".tab[data-view=store]");
+  await b.fill("#fn-tin", "123-456-789"); await b.ev("document.querySelector('#fn-vat').click()");
+  await b.ev("document.querySelector('#finForm').requestSubmit()");
+  for (let i = 0; i < 50; i++) { const s = (await app.api("owner", "GET", "/api/c/settings")).data.find((d) => d.id === "store"); if (s.data.tax && s.data.tax.vatRegistered) break; await new Promise((r) => setTimeout(r, 100)); }
+  await app.api("owner", "PUT", "/api/c/txns/tax-s", { data: { type: "sale", dealerId: "d1", date: day(0), dueDate: day(30), items: [{ productId: "p1", name: "Dish Soap", qty: 1, price: 100, pct: 25 }] } });
+  await b.signIn(app.base, app.jar.owner);
+  await b.ev("location.hash='#receipt/tax-s'");
+  await b.ev("location.reload()");
+  await b.waitFor("/VATable sales/.test(document.querySelector('#rcpt')?.innerText||'')", 15000);
+  assert.match(await b.text("#rcpt"), /TIN 123-456-789[\s\S]*not an official receipt/i);
+  await app.api("owner", "PUT", "/api/c/settings/store", { data: { storeName: "E2E Store", discountPct: 25, holdDays: 60 } });
+  await b.ev("document.querySelector('[data-close]')?.click()");
+  assert.deepEqual(b.errors, []);
+});
+
+test("every screen opens without an error, as owner and as staff", { skip }, async () => {
+  for (const who of ["owner", "staff"]) {
+    await b.signIn(app.base, app.jar[who]);
+    for (const v of ["overview", "orders", "collect", "cash", "dealers", "products", "buying", "activity", "reports", "store"]) {
+      await b.click(`.tab[data-view=${v}]`);
+      await b.waitFor(`document.querySelector('.tab[data-view=${v}]').getAttribute('aria-current')==='page' && document.querySelector('#main').children.length>0`);
+    }
+  }
+  assert.deepEqual(b.errors, []);
+});
+
 test("the owner gives a dealer portal access and the dealer signs in", { skip }, async () => {
   await b.signIn(app.base, app.jar.owner);
   await b.click(".tab[data-view=store]");
