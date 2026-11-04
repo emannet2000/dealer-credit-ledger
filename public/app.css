@@ -345,3 +345,16 @@ dl.kv dd{margin:0;overflow-wrap:anywhere}
 .progress{height:8px;background:var(--sunk);border-radius:4px;overflow:hidden}
 .progress i{display:block;height:100%;background:var(--accent);width:0}
 @media (prefers-reduced-motion:no-preference){.sheet{animation:slide .18s ease-out}@keyframes slide{from{transform:translateX(30px);opacity:.6}to{transform:none;opacity:1}}}
+/* Cash and Buying tabs */
+.stack{display:grid;gap:16px;min-width:0;align-content:start}
+.stack>.panel{margin:0}
+.po-line{margin-bottom:8px}
+/* On a phone each row becomes a small card, so the action buttons are never off-screen. */
+@media (max-width:600px){
+  .ops-tbl thead{display:none}
+  .ops-tbl,.ops-tbl tbody,.ops-tbl tr,.ops-tbl td{display:block;width:100%}
+  .ops-tbl tr{padding:10px 0;border-bottom:1px solid var(--line)}
+  .ops-tbl td{border:0;padding:2px 0;text-align:left;white-space:normal}
+  .ops-tbl td:empty{display:none}
+  .ops-tbl .actions{justify-content:flex-start!important;margin-top:6px}
+}

@@ -2,14 +2,14 @@
 "use strict";
 /* ================= state ================= */
 const S = {
-  dealers:new Map(), products:new Map(), txns:new Map(), moves:new Map(), orders:new Map(), interactions:new Map(), approvals:new Map(), settings:{},
-  loaded:{dealers:false,products:false,txns:false,moves:false,orders:false,interactions:false,approvals:false,settings:false},
+  dealers:new Map(), products:new Map(), txns:new Map(), moves:new Map(), orders:new Map(), interactions:new Map(), approvals:new Map(), cashcloses:new Map(), remittances:new Map(), reminders:new Map(), proofs:new Map(), suppliers:new Map(), purchases:new Map(), settings:{},
+  loaded:{dealers:false,products:false,txns:false,moves:false,orders:false,interactions:false,approvals:false,cashcloses:false,remittances:false,reminders:false,proofs:false,suppliers:false,purchases:false,settings:false},
   canWrite:true, canAdmin:false, me:null, names:{},
   view:"overview", q:"", txFilter:"all", showArchived:false, catFilter:"", stageF:"all", tagF:"",
   range:{preset:"month",from:"",to:""}
 };
 let db=null, downloads=null, assets=null, userNs=null;
-const COLS=["dealers","products","txns","moves","orders","interactions","approvals"];
+const COLS=["dealers","products","txns","moves","orders","interactions","approvals","cashcloses","remittances","reminders","proofs","suppliers","purchases"];
 
 /* ================= helpers ================= */
 const $=(s,el=document)=>el.querySelector(s);
@@ -35,7 +35,7 @@ const fmtStamp=ms=>ms>1e9?STAMP_FMT.format(new Date(ms)):"";
 const METHODS=["Cash","GCash","Maya","Bank transfer","Check","Other"];
 const TYPE_LABEL={sale:"Credit sale",payment:"Payment",return:"Return",adjustment:"Adjustment",writeoff:"Write-off"};
 const PREFIX={sale:"DR",payment:"OR",return:"RT",adjustment:"ADJ",writeoff:"WO"};
-const isLive=t=>!t.voided;
+const isLive=t=>Credit.counts(t);
 // A debit adjustment is a charge. Everything else reduces the balance.
 const isCharge=Credit.isCharge;
 const txnEffect=Credit.txnEffect;
@@ -104,10 +104,11 @@ function creditHistory(id){
   const sum=k=>r2(tx.filter(t=>t.type===k).reduce((a,t)=>a+t.amount,0));
   const sumCharges=r2(tx.filter(isCharge).reduce((a,t)=>a+t.amount,0));
   let score=100; if(n) score-=(1-onTime/n)*40; score-=Math.min(30,avgLate); if(openLate>30) score-=25; if(openLate>holdDays()) score-=40; else if(openLate>0) score-=10;
+  const bounced=dealerTxns(id,true).filter(([,t])=>t.check&&t.check.status==="bounced").length; score-=Math.min(40,bounced*15); // FR-072
   const grade=n<2&&!openLate?{g:"New",label:"Not enough history yet",cls:"neutral"}:score>=85?{g:"A",label:"Excellent payer",cls:"good"}:score>=70?{g:"B",label:"Good payer",cls:"good"}:score>=50?{g:"C",label:"Pays late often",cls:"warn"}:{g:"D",label:"High risk",cls:"bad"};
   const months=lastSixMonths().map(m=>({label:m.label,ym:m.ym,taken:0,paid:0,ret:0})), byYm=new Map(months.map(m=>[m.ym,m]));
   for(const t of tx){ const m=byYm.get((t.date||"").slice(0,7)); if(!m) continue; if(isCharge(t)) m.taken=r2(m.taken+t.amount); else if(t.type==="payment") m.paid=r2(m.paid+t.amount); else if(t.type==="return") m.ret=r2(m.ret+t.amount); }
-  return {rows,n,onTime,avgDays,worst,grade,score:Math.round(score),taken:sumCharges,paid:sum("payment"),returned:sum("return"),writeoff:sum("writeoff"),since:tx.length?tx[0].date:null,months};
+  return {rows,n,onTime,avgDays,worst,grade,bounced,score:Math.round(score),taken:sumCharges,paid:sum("payment"),returned:sum("return"),writeoff:sum("writeoff"),since:tx.length?tx[0].date:null,months};
 }
 const HIST_CACHE={key:null,map:new Map()};
 function history(id){ if(HIST_CACHE.key!==S._ver){HIST_CACHE.key=S._ver;HIST_CACHE.map=new Map();} if(!HIST_CACHE.map.has(id)) HIST_CACHE.map.set(id,creditHistory(id)); return HIST_CACHE.map.get(id); }
@@ -361,7 +362,7 @@ function render(){
   if(!db||!Object.values(S.loaded).every(Boolean)) return;
   const act=document.activeElement, fid=act&&act.closest&&act.closest("#main")&&act.id, pos=act&&act.selectionStart;
   const mainEl=$("#main"); if(S._lastView!==S.view){ S._lastView=S.view; mainEl.classList.remove("view-in"); void mainEl.offsetWidth; mainEl.classList.add("view-in"); }
-  $("#main").innerHTML=({overview:vOverview,orders:vOrders,collect:vCollect,dealers:vDealers,products:vProducts,activity:vActivity,reports:vReports,store:vStore,dash:vDash}[S.view]||vOverview)();
+  $("#main").innerHTML=({overview:vOverview,orders:vOrders,collect:vCollect,dealers:vDealers,products:vProducts,activity:vActivity,reports:vReports,store:vStore,dash:vDash,...window.LedgerOps.views}[S.view]||vOverview)();
   if(S.view==="dash"&&S.canAdmin){ const D=dashData(); mountBars("dashChart",D.series); }
   if(S.view==="reports") mountTrend();
   if(fid){ const el=document.getElementById(fid); if(el){ el.focus(); try{ if(pos!=null) el.setSelectionRange(pos,pos);}catch(e){} } }
@@ -471,7 +472,7 @@ function vProducts(){
 function txDetails(t){
   const it=(t.items||[]).map(i=>`${esc(i.name)} ×${i.qty}`).join(", ");
   const no=t.no?`<span class="small muted">${esc(t.no)}</span> `:"";
-  const vd=(t.voided?` <span class="pill bad">Voided</span>`:"")+(t.offlineHeld?` <span class="pill bad">Needs review</span>`:t.offlinePending?` <span class="pill warn">Not synced</span>`:"");
+  const vd=(t.check&&t.check.status==="bounced"?` <span class="pill bad">Bounced</span>`:t.voided?` <span class="pill bad">Voided</span>`:t.check&&!isLive(t)?` <span class="pill warn">Check not due yet</span>`:"")+(t.offlineHeld?` <span class="pill bad">Needs review</span>`:t.offlinePending?` <span class="pill warn">Not synced</span>`:"");
   if(t.opening) return `${no}<span class="pill neutral">Opening balance</span>${vd}<div class="small muted">Due ${fmtDate(t.dueDate)}${t.note&&t.note!=="Opening balance"?" · "+esc(t.note):""}</div>`;
   if(t.type==="sale") return `${no}<span class="pill neutral">Credit sale</span>${vd}${t.manualPrice?` <span class="pill warn" title="${esc(t.priceReason||"")}">Manual price</span>`:""} <span class="small">${it}</span><div class="small muted">Due ${fmtDate(t.dueDate)}${t.pctDiscount?(t.discountPct!=null?` · less ${t.discountPct}%`:" · less dealer discount"):""}${t.discount?` · less ${P(t.discount)}`:""}${t.note?" · "+esc(t.note):""}</div>`;
   if(t.type==="return") return `${no}<span class="pill warn">Return</span>${vd} <span class="small">${it}</span><div class="small muted">${t.restock?"Back to stock":"Not restocked"}${t.saleNo?` · from ${esc(t.saleNo)}`:""}${t.note?" · "+esc(t.note):""}</div>`;
@@ -532,7 +533,8 @@ function vReports(){
   const meth=Object.entries(R.byM).sort((a,b)=>b[1]-a[1]);
   const net=r2(tot.sale-tot.return);
   const pr=[["month","This month"],["last","Last month"],["year","This year"],["custom","Custom"]];
-  return trendChart()+`<section class="panel" style="margin-bottom:20px">
+  const booksLine=S.settings.closedThrough?`<div class="notice info"><p>The books are closed through <b>${fmtDate(S.settings.closedThrough)}</b>. Figures up to that date are final.</p></div>`:"";
+  return booksLine+trendChart()+`<section class="panel" style="margin-bottom:20px">
     <div class="panel-head"><h2>Report period</h2><div class="actions"><button class="btn sm" data-act="aging" type="button">Receivables aging</button>${window.APP?`<button class="btn sm" data-act="approvals" type="button">Approvals</button>`:""}${downloads?`<button class="btn sm" data-act="export-report" type="button">Export report CSV</button>`:""}</div></div>
     <div class="toolbar"><div class="seg" role="group" aria-label="Period">${pr.map(([v,l])=>`<button type="button" data-preset="${v}" aria-pressed="${S.range.preset===v}">${l}</button>`).join("")}</div>
     ${S.range.preset==="custom"?`<input type="date" id="rFrom" value="${esc(S.range.from)}" aria-label="From"><span class="muted">to</span><input type="date" id="rTo" value="${esc(S.range.to)}" aria-label="To">`:`<span class="small muted">${fmtDate(R.from)} – ${fmtDate(R.to)}</span>`}</div>
@@ -710,7 +712,7 @@ function heldSheet(){
     }]; },true);
 }
 function healthNotices(){
-  const out=[];
+  const out=[window.LedgerOps.notices()];
   const nNew=[...S.orders.values()].filter(o=>o.status==="new").length, nReady=[...S.orders.values()].filter(o=>o.status==="ready").length;
   if(nNew||nReady) out.push(`<div class="notice info"><p><b>${nNew?`${nNew} new online order${nNew===1?"":"s"}`:""}${nNew&&nReady?" · ":""}${nReady?`${nReady} ready for pickup`:""}.</b> Prepare items before the dealer arrives.</p><button class="btn sm" data-act="go-orders" type="button">Open orders</button></div>`); const real=[...S.dealers.values()].some(d=>!d.sample);
   const hold=[...S.dealers.keys()].filter(id=>status(id).maxLate>holdDays()).length;
@@ -954,7 +956,7 @@ const ICON={
   stock:IC('<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M12 8v6M9 11h6"/>'),
   person:IC('<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4.2-6 8-6s7 2 8 6"/><path d="M19 3v4M17 5h4"/>'),
 };
-const VIEW_L={dash:"Dashboard",overview:"Overview",orders:"Orders",collect:"Collections",dealers:"Dealers",products:"Products",activity:"Transactions",reports:"Reports",store:"Store"};
+const VIEW_L={dash:"Dashboard",overview:"Overview",orders:"Orders",collect:"Collections",cash:"Cash",dealers:"Dealers",products:"Products",buying:"Buying",activity:"Transactions",reports:"Reports",store:"Store"};
 function renderBottomNav(){
   const nav=$("#bnav"); if(!nav) return;
   const main=window.APP?["overview","orders","collect","dealers"]:["overview","collect","dealers","products"];
@@ -964,7 +966,7 @@ function renderBottomNav(){
   $("#fab").hidden=!S.canWrite;
 }
 function moreSheet(){
-  const views=["overview",...(S.canAdmin?["dash"]:[]),...(window.APP?["orders"]:[]),"collect","dealers","products","activity","reports","store"];
+  const views=["overview",...(S.canAdmin?["dash"]:[]),...(window.APP?["orders"]:[]),"collect","cash","dealers","products","buying","activity","reports","store"];
   show(()=>[head("Go to")+`<div class="go-grid">${views.map(v=>`<button type="button" class="go" data-go="${v}" aria-current="${S.view===v?"page":"false"}">${ICON[v]}<span>${VIEW_L[v]}</span></button>`).join("")}</div>`,sh=>{
     sh.addEventListener("click",e=>{ const b=e.target.closest("[data-go]"); if(b) goView(b.dataset.go); });
   }]);
@@ -1364,6 +1366,9 @@ function dealerForm(id,preStage){
     <label class="f">Current balance owed (₱)<input id="d-ob" type="number" min="0" step="0.01" placeholder="0.00"></label>
     <label class="f">Date they took those goods<input id="d-obdate" type="date" value="${today()}"></label>`}
     ${id?"":`<label class="f">First follow-up<input id="d-fu" type="date" min="${today()}" value="${prospect?addDays(today(),3):""}"><span class="hint">Adds a reminder to the Follow-ups list.</span></label>`}
+    ${S.canAdmin&&(S.team||[]).some(u=>u.collector)?`<label class="f">Collector<select id="d-coll"><option value="">Nobody yet</option>${(S.team||[]).filter(u=>u.collector&&u.active).map(u=>`<option value="${esc(u.id)}" ${d.collectorId===u.id?"selected":""}>${esc(u.name)}</option>`).join("")}</select></label>
+    <label class="f">Route order<input id="d-route" type="number" min="1" step="1" value="${esc(d.routeOrder??"")}" placeholder="1 = first stop"></label>`:""}
+    <label class="chk span"><input type="checkbox" id="d-nomsg" ${d.noReminders?"checked":""}> Don't send this dealer automatic reminders</label>
     <label class="f span">Notes<textarea id="d-notes" placeholder="Collection day, ID on file…">${esc(d.notes)}</textarea></label>
     <p class="err span" id="d-err" role="alert" aria-live="polite" style="color:var(--bad);margin:0"></p>
     <div class="actions span"><button class="btn primary" type="submit">${id?"Save changes":prospect?"Add prospect":"Add dealer"}</button><button class="btn" type="button" data-back>Cancel</button>
@@ -1409,7 +1414,7 @@ function dealerForm(id,preStage){
       const email=$("#d-email").value.trim(); if(email&&!$("#d-email").checkValidity()){ $("#d-err").textContent="That email address doesn't look right."; return; }
       const lim=$("#d-limit").value.trim();
       const base=id?{...S.dealers.get(id)}:{createdAt:Date.now(),createdBy:S.me,active:true};
-      const data={...base,name,firstName,middleName,lastName,gender:$("#d-gender").value||null,phone,email,messenger:$("#d-msgr").value.trim(),birthday:$("#d-bday").value||null,area:$("#d-area").value.trim(),address:$("#d-addr").value.trim(),
+      const data={...base,name,firstName,middleName,lastName,noReminders:$("#d-nomsg").checked,...($("#d-coll")?{collectorId:$("#d-coll").value||null,routeOrder:$("#d-route").value?Number($("#d-route").value):null}:{}),gender:$("#d-gender").value||null,phone,email,messenger:$("#d-msgr").value.trim(),birthday:$("#d-bday").value||null,area:$("#d-area").value.trim(),address:$("#d-addr").value.trim(),
         consent:(()=>{ const m=$("#d-consent").value; return !m?null:base.consent&&base.consent.method===m?base.consent:{method:m}; })(),
         stage:$("#d-stage").value,source:$("#d-src").value,referredBy:$("#d-ref").value.trim(),tags:$("#d-tags").value.split(",").map(t=>t.trim()).filter(Boolean),
         creditLimit:lim===""?null:r2(lim),terms:Math.max(0,Math.round(Number($("#d-terms").value)||0)),discountPct:$("#d-pct").value===""?null:Math.min(100,Math.max(0,Number($("#d-pct").value))),notes:$("#d-notes").value.trim(),updated:stamp()};
@@ -1567,7 +1572,7 @@ function creditHistoryPanel(id){
   const maxM=Math.max(1,...h.months.map(m=>Math.max(m.taken,m.paid)));
   const res=r=>r.paid?(r.late?`<span class="pill warn">Paid ${r.late} day${r.late===1?"":"s"} late</span>`:`<span class="pill good">Paid on time</span>`):(r.late?`<span class="pill bad">Unpaid · ${r.late} days late</span>`:`<span class="pill neutral">Unpaid · not yet due</span>`);
   return `<section class="panel" style="margin-bottom:16px">
-    <div class="panel-head"><h2>Credit history</h2><div class="actions">${gradePill(h)}<span class="small muted">${esc(h.grade.label)}${h.grade.g!=="New"?` · score ${h.score}/100`:""}</span></div></div>
+    <div class="panel-head"><h2>Credit history</h2><div class="actions">${gradePill(h)}<span class="small muted">${esc(h.grade.label)}${h.grade.g!=="New"?` · score ${h.score}/100`:""}${h.bounced?` · ${h.bounced} bounced check${h.bounced===1?"":"s"}`:""}</span></div></div>
     <div class="stat-row">
       <div class="kpi"><div class="lbl">Paid on time</div><div class="val num">${h.n?Math.round(h.onTime/h.n*100)+"%":"—"}</div><div class="sub">${h.onTime} of ${h.n} paid deliveries</div></div>
       <div class="kpi"><div class="lbl">Average days to pay</div><div class="val num">${h.avgDays??"—"}</div><div class="sub">From release to fully paid</div></div>
@@ -1911,7 +1916,12 @@ function paymentForm(dealerId,editId,preset){
     <label class="f">Amount received (₱)<input id="y-amt" type="number" min="0.01" step="0.01" required inputmode="decimal" value="${old?old.amount:preset&&preset.amount?preset.amount:""}"></label>
     <label class="f">Date<input id="y-date" type="date" required value="${old?old.date:today()}"></label>
     <label class="f">Method<select id="y-method">${METHODS.map(m=>`<option ${old&&old.method===m?"selected":""}>${m}</option>`).join("")}</select></label>
-    <label class="f">Reference no.<input id="y-ref" value="${esc(old?old.ref:"")}" placeholder="GCash / bank ref, check no."></label>
+    <label class="f">Reference no.<input id="y-ref" value="${esc(old?old.ref:"")}" placeholder="GCash / bank ref"></label>
+    <div class="form-grid span" id="y-check" ${old&&old.method==="Check"?"":"hidden"}>
+      <label class="f">Bank<input id="y-bank" maxlength="80" value="${esc(old&&old.check?old.check.bank:"")}"></label>
+      <label class="f">Check no.<input id="y-chkno" maxlength="40" value="${esc(old&&old.check?old.check.number:"")}"></label>
+      <label class="f">Check date<input id="y-chkdate" type="date" value="${esc(old&&old.check?old.check.date:today())}"><span class="hint">A later date is held until then: it doesn't reduce the balance yet.</span></label>
+    </div>
     <label class="f span">Note<input id="y-note" value="${esc(old?old.note:"")}"></label>
     <div class="span" id="y-pick"></div>
     <div class="span" id="y-alloc"></div>
@@ -1956,8 +1966,11 @@ function paymentForm(dealerId,editId,preset){
       const O2=openDeliveries(did,editId), usePicks=pickOn&&picks.size>0, R=allocate(O2.open,amount,usePicks?picks:null), bal=r2(O2.open.reduce((x,o)=>x+o.rem,0)-O2.credit);
       if(usePicks&&pickSum()>amount+0.004){ toast("The chosen deliveries add up to more than the amount received","error"); return; }
       for(const [k,v] of picks){ const o=O2.open.find(x=>x.id===k); if(usePicks&&o&&v>o.rem+0.004){ toast(`Only ${P(o.rem)} is unpaid on ${o.t.no||"that delivery"}`,"error"); return; } }
-      const data={...(old||{}),type:"payment",dealerId:did,date:$("#y-date").value,amount,method:$("#y-method").value,ref:$("#y-ref").value.trim(),note:$("#y-note").value.trim(),
+      const isCheck=$("#y-method").value==="Check";
+      if(isCheck&&(!$("#y-bank").value.trim()||!$("#y-chkno").value.trim()||!$("#y-chkdate").value)){ toast("Enter the bank, check number and check date","error"); return; }
+      const data={...(old||{}),type:"payment",dealerId:did,date:$("#y-date").value,amount,method:$("#y-method").value,...(isCheck?{check:{...(old&&old.check||{}),bank:$("#y-bank").value.trim(),number:$("#y-chkno").value.trim(),date:$("#y-chkdate").value}}:{}),ref:$("#y-ref").value.trim(),note:$("#y-note").value.trim(),
         payKind:amount>=bal-0.004&&bal>0?"full":bal>0?"partial":"advance",applied:R.lines.map(l=>({no:l.no,amount:l.amount,left:l.left,...(l.chosen?{chosen:true}:{})})),balanceBefore:bal};
+      if(!isCheck) delete data.check;
       if(usePicks) data.alloc=[...picks].filter(([,v])=>v>0).map(([id,v])=>({id,amount:r2(v)})); else delete data.alloc;
       if(!old){ data.no=nextNo("payment"); data.createdAt=Date.now(); data.createdBy=S.me; } else data.updated=stamp();
       guarded(btn,async()=>{ const ref=db.collection("txns").doc(editId||undefined); await ref.set(data); toast(editId?"Payment updated":`${data.payKind==="full"?"Full":data.payKind==="partial"?"Partial":"Advance"} payment ${data.no} recorded`); if(editId) back(); else { stack.pop(); receiptSheet(ref.id); } });
@@ -2098,7 +2111,7 @@ function portalPanel(){
 }
 function teamPanel(){
   const me=S.acct||{}, owner=me.role==="owner", list=S.team||[];
-  return portalPanel()+`<section class="panel"><div class="panel-head"><h2>Team accounts</h2>${owner?`<button class="btn sm primary" data-act="new-user" type="button">+ Add person</button>`:""}</div>
+  return window.LedgerOps.storePanels()+portalPanel()+`<section class="panel"><div class="panel-head"><h2>Team accounts</h2>${owner?`<button class="btn sm primary" data-act="new-user" type="button">+ Add person</button>`:""}</div>
     ${list.length?`<table><tbody>${list.map(u=>`<tr><td><b>${esc(u.name)}</b>${u.id===me.id?" (you)":""}<div class="small muted">${esc(u.username||"")}</div></td><td><span class="pill ${u.active?(u.role==="dealer"?"good":"neutral"):"bad"}">${u.active?ROLE_L[u.role]:"Disabled"}</span>${u.twoStep?` <span class="pill good">2-step</span>`:""}${u.role==="dealer"&&u.dealerId?`<div class="small muted">${esc((S.dealers.get(u.dealerId)||{}).name||"")}</div>`:""}</td><td class="r">${owner&&u.id!==me.id?`<button class="btn sm" data-act="edit-user" data-id="${esc(u.id)}" type="button">Edit</button>`:""}</td></tr>`).join("")}</tbody></table>`:`<p class="small muted">Loading…</p>`}
     <dl class="kv" style="margin-top:12px"><dt><span class="pill neutral">Staff</span></dt><dd>Record sales, payments, returns and stock. Can edit or void only what they recorded today. Can't change prices, credit limits or settings, or release goods to dealers on hold.</dd>
     <dt><span class="pill neutral">Editor</span></dt><dd>Everything staff can do, plus store settings, credit rules, prices, approving credit holds and editing any record.</dd>
@@ -2112,7 +2125,7 @@ function teamPanel(){
   ${S.canAdmin?`<section class="panel"><div class="panel-head"><h2>Activity log</h2><button class="btn sm" data-act="load-audit" type="button">${S.audit?"Refresh":"Show recent activity"}</button></div>${S.audit?auditTable():`<p class="small muted" style="margin:0">Every sign-in, change and deletion is recorded with who did it and when.</p>`}</section>`:""}`;
 }
 function auditTable(){
-  const lbl={create:"Added",update:"Changed",delete:"Deleted",restore:"Restored",stock:"Stock changed",login:"Signed in",upload:"Photo added",setup:"Created the ledger",password_change:"Changed password",user_create:"Added account",user_update:"Changed account","2fa_enabled":"Turned on two-step sign-in","2fa_disabled":"Turned off two-step sign-in","2fa_recovery_used":"Used a recovery code",signout_others:"Signed out other devices",signout_everywhere:"Signed someone out everywhere",backup_run:"Ran a backup",asset_cleanup:"Removed unused pictures",approval_request:"Asked for approval",approval_approve:"Approved a sale",approval_reject:"Rejected a request",approval_withdraw:"Withdrew a request",view_profile:"Opened a dealer profile",personal_data_export:"Exported personal data",personal_data_anonymise:"Removed personal data",consent_given:"Accepted the privacy notice"};
+  const lbl={cash_close:"Closed the day",cash_reopen:"Reopened a day",period_close:"Closed the books",period_reopen:"Reopened the books",check_cleared:"Check cleared",check_bounced:"Check bounced",remittance:"Handed in remittance",remittance_approve:"Approved remittance",proof_submit:"Dealer sent proof of payment",proof_approve:"Approved proof of payment",proof_reject:"Rejected proof of payment",goods_received:"Received goods",reminders_run:"Sent reminders",create:"Added",update:"Changed",delete:"Deleted",restore:"Restored",stock:"Stock changed",login:"Signed in",upload:"Photo added",setup:"Created the ledger",password_change:"Changed password",user_create:"Added account",user_update:"Changed account","2fa_enabled":"Turned on two-step sign-in","2fa_disabled":"Turned off two-step sign-in","2fa_recovery_used":"Used a recovery code",signout_others:"Signed out other devices",signout_everywhere:"Signed someone out everywhere",backup_run:"Ran a backup",asset_cleanup:"Removed unused pictures",approval_request:"Asked for approval",approval_approve:"Approved a sale",approval_reject:"Rejected a request",approval_withdraw:"Withdrew a request",view_profile:"Opened a dealer profile",personal_data_export:"Exported personal data",personal_data_anonymise:"Removed personal data",consent_given:"Accepted the privacy notice"};
   const what=a=>{ let d={}; try{ d=JSON.parse(a.detail||"{}")||{}; }catch(e){}
     if(a.collection==="txns") return `${esc(d.no||"")} ${esc(TYPE_LABEL[d.type]||"")} ${d.amount?P(d.amount):""}${d.voided?" (voided)":""}`;
     if(a.collection==="dealers"||a.collection==="products") return esc(d.name||"");
@@ -2128,19 +2141,20 @@ function userForm(id,presetDealer,presetRole){
     <label class="f">Role<select id="u-role">${["staff","editor","viewer","dealer"].map(r=>`<option value="${r}" ${(u?u.role===r:(pd||presetRole==="dealer")&&r==="dealer")?"selected":""}>${ROLE_L[r]}</option>`).join("")}</select></label>
     <label class="f span" id="u-dwrap">Which dealer<select id="u-dealer"><option value="">Choose dealer…</option>${activeDealers().map(([did,dd])=>`<option value="${did}" ${(u?u.dealerId===did:presetDealer===did)?"selected":""}>${esc(dd.name)}</option>`).join("")}</select><span class="hint">They will only see this dealer's own records.</span></label>
     <label class="f">${u?"New password (leave blank to keep)":"Password"}<input id="u-pw" type="password" autocomplete="new-password" ${u?"":"required"} minlength="8" placeholder="At least 8 characters"></label>
+    <label class="chk span" id="u-cwrap"><input type="checkbox" id="u-coll" ${u&&u.collector?"checked":""}> Collector: has a route and hands in a daily remittance</label>
     ${u?`<label class="chk span"><input type="checkbox" id="u-active" ${u.active?"checked":""}> Account active (untick to block sign-in right away)</label>`:""}
     <div class="actions span"><button class="btn primary" type="submit">${u?"Save changes":"Add person"}</button><button class="btn" type="button" data-back>Cancel</button></div></form>
     ${u?`<section class="panel" style="margin-top:16px"><h2>Lost phone or left the business?</h2><p class="small" style="margin-top:0">“Sign out everywhere” ends all of ${esc(u.name)}'s sessions. Phones that saved ledger data for offline use delete it the next time they connect.</p>
       <div class="actions"><button class="btn danger" type="button" id="u-signout">Sign out everywhere</button>${u.twoStep?`<button class="btn" type="button" id="u-reset2">Reset two-step sign-in</button>`:""}</div></section>`:""}`,sh=>{
     const so=$("#u-signout",sh); if(so) so.addEventListener("click",()=>{ if(armed(so,"Tap again to sign out")) guarded(so,async()=>{ await window.APP.signoutUser(u.id); toast(`${u.name} was signed out everywhere`); so.disabled=false; so.textContent="Sign out everywhere"; }); });
     const r2b=$("#u-reset2",sh); if(r2b) r2b.addEventListener("click",()=>{ if(armed(r2b,"Tap again to reset")) guarded(r2b,async()=>{ await window.APP.updateUser(u.id,{resetTwoStep:true}); await loadTeam(); toast(`Two-step sign-in reset for ${u.name}. They can set it up again.`); back(); }); });
-    const syncRole=()=>{ $("#u-dwrap",sh).hidden=$("#u-role",sh).value!=="dealer"; }; $("#u-role",sh).addEventListener("change",syncRole); syncRole();
+    const syncRole=()=>{ const v=$("#u-role",sh).value; $("#u-dwrap",sh).hidden=v!=="dealer"; $("#u-cwrap",sh).hidden=!["staff","editor"].includes(v); }; $("#u-role",sh).addEventListener("change",syncRole); syncRole();
     $("#u-dealer",sh).addEventListener("change",e=>{ const d=S.dealers.get(e.target.value), n=$("#u-name",sh); if(d&&!n.value.trim()) n.value=d.name; });
     $("#f",sh).addEventListener("submit",e=>{ e.preventDefault(); const btn=e.submitter||$("button[type=submit]",sh);
       const pw=$("#u-pw").value; const body={name:$("#u-name").value.trim(),role:$("#u-role").value};
       if(body.role==="dealer"){ body.dealerId=$("#u-dealer").value; if(!body.dealerId){ toast("Choose which dealer this account is for"); return; } }
       if(pw) body.password=pw; if(u) body.active=$("#u-active").checked; else body.username=$("#u-user").value.trim();
-      guarded(btn,async()=>{ if(u) await window.APP.updateUser(u.id,body); else await window.APP.createUser(body); await loadTeam(); toast(u?"Account updated":"Account added. Give them their username and password."); back(); });
+      guarded(btn,async()=>{ const collector=["staff","editor"].includes(body.role)&&$("#u-coll").checked; if(u) await window.APP.updateUser(u.id,{...body,collector}); else { const made=await window.APP.createUser(body); if(collector) await window.APP.updateUser(made.id,{collector}); } await loadTeam(); toast(u?"Account updated":"Account added. Give them their username and password."); back(); });
     });
   }]);
 }
@@ -2200,6 +2214,7 @@ document.addEventListener("click",e=>{
   const pre=e.target.closest("[data-preset]"); if(pre){ S.range.preset=pre.dataset.preset; if(S.range.preset==="custom"&&!S.range.from){ const [f,t]=[addDays(today(),-30),today()]; S.range.from=f; S.range.to=t; } render(); return; }
   const a=e.target.closest("[data-act]");
   if(a){ const act=a.dataset.act, id=a.dataset.id;
+    const opsAct=window.LedgerOps.actions(a,id); if(opsAct){ opsAct(); return; }
     ({ "new-sale":()=>itemsForm("sale"), "new-pay":()=>paymentForm(), "new-return":()=>itemsForm("return"),
        "sale-for":()=>itemsForm("sale",id), "pay-for":()=>paymentForm(id), "ret-for":()=>itemsForm("return",id),
        "adjust-for":()=>adjustmentForm(id), "writeoff-for":()=>writeoffForm(id),
@@ -2257,7 +2272,8 @@ document.addEventListener("submit",e=>{
   const data={storeName:$("#st-name").value.trim(),phone:$("#st-phone").value.trim(),address:$("#st-addr").value.trim(),paymentInfo:$("#st-pay").value.trim(),defaultTerms:Math.max(0,Math.round(Number($("#st-terms").value)||0)),footer:$("#st-foot").value.trim(),defaultLimit:$("#st-limit").value===""?null:r2($("#st-limit").value),holdDays:Math.max(1,Math.round(Number($("#st-hold").value)||60)),approvalHours:Math.min(336,Math.max(1,Math.round(Number($("#st-apph").value)||24))),blockOverLimit:$("#st-block").checked,allowNegativeStock:$("#st-neg").checked,reminderTemplate:$("#st-msg").value.trim(),privacyNotice:$("#st-privacy").value.trim(),retentionYears:Math.min(30,Math.max(1,Math.round(Number($("#st-ret").value)||10))),discountPct:Math.min(100,Math.max(0,Number($("#st-pct").value)||0)),updated:stamp()};
   guarded(btn,async()=>{ await db.doc("settings/store").set(data); toast("Store details saved"); btn.disabled=false; });
 });
-const VIEWS=["overview","orders","collect","dealers","products","activity","reports","store"];
+window.LedgerUI={S,$,$$,esc,P,fmtDate,fmtStamp,today,addDays,status,head,show,back,toast,errMsg,guarded,armed,render,activeDealers,r2,goView,METHODS,saveStore:patch=>db.doc("settings/store").set({...S.settings,...patch})};
+const VIEWS=["overview","orders","collect","cash","dealers","products","buying","activity","reports","store"];
 // QR codes carry app deep links: #dealer/<id>, #product/<id>, #receipt/<id>,
 // #statement/<id>, #order/<id>, #aging[ /<dealerId>] and #summary.
 const DEEP_KINDS={dealer:1,product:1,tx:1,receipt:1,statement:1,order:1,aging:1};

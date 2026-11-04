@@ -2,9 +2,9 @@
 
 This document defines the target functional requirements for the Dealer Credit Ledger. It covers the existing product plus the modules needed for a complete credit, inventory and collections system.
 
-- **Document version:** 1.5
+- **Document version:** 1.6
 - **Application version:** 1.0 (Node.js 20+, SQLite, vanilla JS)
-- **Last updated:** 3 November 2026
+- **Last updated:** 4 November 2026
 - **Requirement count:** 88 functional, plus 12 production-readiness items
 
 ## How to read this document
@@ -24,7 +24,7 @@ This document defines the target functional requirements for the Dealer Credit L
 | Module | Range | Total | Implemented | Partial | Planned |
 |---|---|---:|---:|---:|---:|
 | Credit and receivables | FR-001 – FR-012 | 12 | 10 | 0 | 2 |
-| Inventory and procurement | FR-013 – FR-024 | 12 | 7 | 0 | 5 |
+| Inventory and procurement | FR-013 – FR-024 | 12 | 10 | 0 | 2 |
 | Orders and fulfillment | FR-025 – FR-034 | 10 | 8 | 0 | 2 |
 | Pricing and catalog | FR-035 – FR-040 | 6 | 4 | 0 | 2 |
 | Returns and adjustments | FR-041 – FR-045 | 5 | 2 | 1 | 2 |
@@ -32,11 +32,11 @@ This document defines the target functional requirements for the Dealer Credit L
 | Security, users and audit | FR-054 – FR-061 | 8 | 8 | 0 | 0 |
 | Backup and operations | FR-062 – FR-067 | 6 | 6 | 0 | 0 |
 | Platform and integrations | FR-068 – FR-070 | 3 | 0 | 1 | 2 |
-| Collections and controls | FR-071 – FR-074 | 4 | 0 | 0 | 4 |
+| Collections and controls | FR-071 – FR-074 | 4 | 3 | 0 | 1 |
 | Dealer relationships (CRM) | FR-075 | 1 | 1 | 0 | 0 |
-| Field collections, privacy and growth | FR-076 – FR-082 | 7 | 1 | 1 | 5 |
+| Field collections, privacy and growth | FR-076 – FR-082 | 7 | 4 | 1 | 2 |
 | Catalog media, approvals and field use | FR-083 – FR-088 | 6 | 5 | 0 | 1 |
-| **Total** | | **88** | **60** | **3** | **25** |
+| **Total** | | **88** | **69** | **3** | **16** |
 
 ### P0 items delivered in this release
 
@@ -274,7 +274,7 @@ This document defines the target functional requirements for the Dealer Credit L
 ### FR-019 — Supplier registry
 
 - **Priority:** P1
-- **Status:** Planned
+- **Status:** Implemented
 - **User story:** As the owner, I want a list of suppliers with contacts and terms so purchasing is organised.
 - **Acceptance criteria:**
   - A supplier has a name, contact person, phone, address, payment terms and notes.
@@ -284,18 +284,18 @@ This document defines the target functional requirements for the Dealer Credit L
 ### FR-020 — Purchase orders
 
 - **Priority:** P1
-- **Status:** Planned
+- **Status:** Implemented
 - **User story:** As the owner, I want to order stock from a supplier and track what is still outstanding.
 - **Acceptance criteria:**
   - A purchase order has a supplier, order date, expected date, lines, quantities and cost prices.
-  - The server assigns a sequential `PO-` purchase number that does not collide with online orders.
+  - The server assigns a sequential `SPO-` purchase number. Online orders already use `PO-`, so the two never collide.
   - Statuses cover draft, ordered, partially received, received and cancelled.
   - Totals and outstanding quantities are shown.
 
 ### FR-021 — Goods received and supplier invoices
 
 - **Priority:** P1
-- **Status:** Planned
+- **Status:** Implemented
 - **User story:** As store staff, I want to receive goods against a purchase order so stock and payables update.
 - **Acceptance criteria:**
   - A receipt records received quantities, date and reference.
@@ -895,7 +895,7 @@ This document defines the target functional requirements for the Dealer Credit L
 ### FR-071 — Automated dealer payment reminders
 
 - **Priority:** P1
-- **Status:** Planned
+- **Status:** Implemented
 - **User story:** As the owner, I want dealers reminded automatically before and after a due date so I do not have to copy and send statements by hand.
 - **Acceptance criteria:**
   - A reminder schedule can be configured, for example 3 days before due, on the due date and 7 days overdue.
@@ -907,7 +907,7 @@ This document defines the target functional requirements for the Dealer Credit L
 ### FR-072 — Post-dated and bounced checks
 
 - **Priority:** P1
-- **Status:** Planned
+- **Status:** Implemented
 - **User story:** As store staff, I want to track post-dated checks and reverse bounced ones so the dealer's balance reflects money actually received.
 - **Acceptance criteria:**
   - A check payment records bank, check number, check date and amount.
@@ -919,7 +919,7 @@ This document defines the target functional requirements for the Dealer Credit L
 ### FR-073 — Period close and lock
 
 - **Priority:** P1
-- **Status:** Planned
+- **Status:** Implemented
 - **User story:** As the owner, I want to close a month so nobody can change transactions that have already been reported.
 - **Acceptance criteria:**
   - An admin can close a period up to a chosen date.
@@ -966,7 +966,7 @@ This document defines the target functional requirements for the Dealer Credit L
 ### FR-076 — Dealer upload of proof of payment
 
 - **Priority:** P1
-- **Status:** Planned
+- **Status:** Implemented
 - **User story:** As a dealer, I want to upload my GCash, Maya or bank transfer receipt in the portal so the store records my payment without me having to send screenshots over chat.
 - **Acceptance criteria:**
   - In the portal, a dealer can submit the amount, payment method, reference number, date paid and one or more photos of the receipt.
@@ -979,7 +979,7 @@ This document defines the target functional requirements for the Dealer Credit L
 ### FR-077 — Collector routes and daily remittance
 
 - **Priority:** P1
-- **Status:** Planned
+- **Status:** Implemented
 - **User story:** As the owner, I want each collector to have an assigned route and to hand over what they collected each day so I can see right away when cash goes missing.
 - **Acceptance criteria:**
   - A user can be marked as a collector, and dealers or areas can be assigned to a collector.
@@ -1005,7 +1005,7 @@ This document defines the target functional requirements for the Dealer Credit L
 ### FR-079 — Daily cash close
 
 - **Priority:** P1
-- **Status:** Planned
+- **Status:** Implemented
 - **User story:** As the owner, I want to close each business day by counting money on hand against what the app recorded so mistakes and losses are caught the same day.
 - **Acceptance criteria:**
   - For a chosen day, the app totals payments recorded by method: cash, GCash, Maya, bank transfer, check and other.
@@ -1325,6 +1325,10 @@ These apply to every functional requirement above.
 - **Full backup:** `GET /api/backup/full`; full restore: `POST /api/backup/restore` with a 50 MB JSON limit.
 - **Aging and statements:** `agingFor(dealerId, asOf)` in `public/app.js` settles charges FIFO using only transactions dated on or before the as-of date, so each unpaid charge falls in one bucket and buckets − unapplied credit = balance. `periodStatement()` reuses it to show what is unpaid at the end of the period. Both open as printable sheets; the aging report exports CSV with dealer and transaction IDs and ISO dates.
 - **QR codes:** `GET /api/qr?data=…&size=…` returns an authenticated PNG (text capped at 600 characters, size clamped to 96–600 px). Receipts, statements, aging reports and the owner summary print a QR code, and dealers and products have printable QR labels. Each code encodes an app deep link such as `#receipt/<id>`, `#statement/<id>`, `#aging[/<dealerId>]`, `#summary`, `#dealer/<id>` or `#product/<id>`; `hashTarget()` parses it and `openDeepLink()` opens the record after the ledger loads. The dealer portal understands the same receipt, statement, order, dealer and product links, so a dealer who scans a receipt sees it in their account.
+- **Shared rules:** `lib/credit.js` is served as `/credit.js`, so the server, staff app and portal use one copy of `settle()`, `counts()` and `splitName()`. `counts()` leaves out voided records and post-dated checks until their date.
+- **Daily operations:** `lib/ops.js` holds the rules and routes for cash close, remittance, checks, proof of payment, reminders and purchasing; `public/ops.js` holds their screens. New collections: `cashcloses`, `remittances`, `reminders`, `proofs`, `suppliers`, `purchases`.
+- **Ledger history:** a transaction can only be voided, never deleted (sample records are the exception). `settings.closedThrough` locks transactions on or before that date; it changes only through `/api/periods/close` and `/api/periods/reopen`. A closed cash day locks that day's payments. A check that bounces inside a locked date is reversed by a debit dated today, so closed books are not rewritten.
+- **Reminders:** `REMINDER_WEBHOOK_URL` receives `{ channel, to, message }` as JSON, with `REMINDER_WEBHOOK_TOKEN` as a bearer token. The server runs hourly from 09:00 to 18:00. Each reminder is keyed by dealer, due date and schedule step, so a sent message is never repeated and a failed one is retried.
 - **Duplicate checks:** `findDealerMatches()` and `findProductMatches()` in `public/app.js` run in the browser as a form is filled in, against the full dealer and product lists including archived records. Anonymised dealers are skipped. They warn but don't block, so two different people can share a name; the server does not enforce uniqueness.
 - **Dealer CRM:** dealers carry `stage`, `stageHistory`, contact fields and `tags`; contact entries live in the `interactions` collection (`dealerId`, `kind`, `date`, `outcome`, `note`, `followUp`, `followUpDone`). The server promotes a prospect to `dealer` inside the same transaction as its first sale.
 - **Product pictures from the internet:** `POST /api/assets/fetch { url }` downloads a picture on the server (`lib/fetch-image.js`) and stores it like an upload. Only http(s) on ports 80/443; every resolved address must be public (checked at connect time and on each redirect); 8 MB and 12 s limits; the file must really be JPG, PNG, WebP or GIF; a product page link uses its `og:image`. The source link is kept as `imageLink` and in the activity log. `IMAGE_FETCH_ALLOW_PRIVATE=1` lifts the address check and is for tests only.

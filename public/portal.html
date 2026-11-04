@@ -156,7 +156,7 @@ function qrBlock(text,label){
   return `<div class="qr-block"><img src="${esc(qrUrl(text,170))}" alt="${esc(label)} QR code" width="170" height="170"><div class="small"><b>${esc(label)}</b><div class="muted">Scan with a phone camera to open it again.</div></div></div>`;
 }
 
-const S={me:null,dealer:null,txns:[],products:[],orders:[],settings:{},tab:"unpaid",q:"",cart:new Map()};
+const S={me:null,dealer:null,txns:[],products:[],orders:[],proofs:[],settings:{},tab:"unpaid",q:"",cart:new Map()};
 try{ const c=JSON.parse(localStorage.getItem("portal-cart")||"[]"); S.cart=new Map(c); }catch(e){}
 const saveCart=()=>{ try{ localStorage.setItem("portal-cart",JSON.stringify([...S.cart])); }catch(e){} };
 const myPct=()=>{ const d=S.dealer||{}, s=S.settings; return d.discountPct!=null&&d.discountPct!==""?Number(d.discountPct):Number(s.discountPct??25); };
@@ -168,7 +168,7 @@ function cartTotals(){ let sub=0, disc=0, n=0; const pcts=new Set(); S.cart.forE
 const ORD_L={new:"Received",preparing:"Preparing",ready:"Ready for pickup",released:"Released to you",cancelled:"Cancelled"};
 const ORD_C={new:"neutral",preparing:"warn",ready:"good",released:"neutral",cancelled:"bad"};
 const STEP={new:1,preparing:2,ready:3,released:4};
-const live=()=>S.txns.filter(t=>!t.voided).sort((a,b)=>(a.date||"").localeCompare(b.date||"")||(a.createdAt||0)-(b.createdAt||0));
+const live=()=>S.txns.filter(t=>Credit.counts(t)).sort((a,b)=>(a.date||"").localeCompare(b.date||"")||(a.createdAt||0)-(b.createdAt||0));
 function compute(){
   const tx=live(), t0=today(), runAt=new Map(); let run=0;
   tx.forEach(t=>{ run=r2(run+txnEffect(t)); runAt.set(t,run); });
@@ -197,11 +197,20 @@ function render(){
   else if(c.overdue) html+=`<div class="notice warn"><b>${P(c.overdue)} is past due.</b> Please pay soon to keep your account in good standing.</div>`;
   if(s.paymentInfo) html+=`<section class="card"><div class="pay"><div><h3 style="font-size:16px">How to pay</h3><p>${esc(s.paymentInfo)}</p></div><button class="btn sm" id="copyPay" type="button">Copy</button></div>${s.phone?`<p class="small muted" style="margin:8px 0 0">Questions? Contact ${esc(s.storeName||"the store")}: ${esc(s.phone)}</p>`:""}</section>`;
   const openOrders=S.orders.filter(o=>["new","preparing","ready"].includes(o.status)).length;
-  const tabs=[["unpaid",`Unpaid (${c.open.length})`],["catalog","Order"],["orders",`My orders${openOrders?` (${openOrders})`:""}`],["history","History"],["account","Account"]];
+  const tabs=[["unpaid",`Unpaid (${c.open.length})`],["proof","Send proof"],["catalog","Order"],["orders",`My orders${openOrders?` (${openOrders})`:""}`],["history","History"],["account","Account"]];
   html+=`<div class="tabs" role="tablist">${tabs.map(([k,l])=>`<button class="tab" role="tab" type="button" data-tab="${k}" aria-selected="${S.tab===k}">${l}</button>`).join("")}</div>`;
   if(S.tab==="unpaid") html+=c.open.length?`<div class="list">${c.open.slice().reverse().map(o=>`<button class="row" type="button" data-rc="${esc(o.t._id)}"><div><b>${esc(o.t.no||LABEL.sale)}</b><div class="small muted">Released ${fmtDate(o.t.date)} · due ${fmtDate(o.t.dueDate)}</div>${o.rem<o.t.amount-0.004?`<div class="small" style="color:var(--good)">${P(o.t.amount-o.rem)} of ${P(o.t.amount)} paid</div>`:""}</div><div class="r"><b class="num">${P(o.rem)}</b><div>${o.late?`<span class="pill bad">${o.late} days late</span>`:`<span class="pill neutral">Not yet due</span>`}</div></div></button>`).join("")}</div>`:`<div class="empty">You have no unpaid deliveries. Salamat po!</div>`;
   if(S.tab==="history"){ const all=S.txns.slice().sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.createdAt||0)-(a.createdAt||0));
     html+=all.length?`<div class="list">${all.map(t=>`<button class="row ${t.voided?"void":""}" type="button" data-rc="${esc(t._id)}"><div><b>${esc(t.opening?"Opening balance":t.payKind==="partial"?"Partial payment":t.payKind==="full"?"Full payment":LABEL[t.type]||t.type)} ${esc(t.no||"")}</b><div class="small muted">${fmtDate(t.date)}${t.type==="payment"?" · "+esc(t.method||""):""}${t.direction?" · "+esc(t.direction):""}${t.voided?" · cancelled":""}</div></div><div class="r"><b class="num amt">${isCharge(t)?"":"−"}${P(t.amount)}</b>${t.voided?"":`<div class="small muted num">Balance ${P(c.runAt.get(t))}</div>`}</div></button>`).join("")}</div>`:`<div class="empty">No transactions yet.</div>`; }
+  if(S.tab==="proof"){ const P_L={pending:["Waiting for the store","neutral"],approved:["Approved","good"],rejected:["Not accepted","bad"]}, list=S.proofs.slice().sort((a,b)=>b.submittedAt-a.submittedAt);
+    html+=`<section class="card"><h3 style="font-size:16px;margin-top:0">Paid by GCash, Maya or bank?</h3><p class="small muted">Send your receipt here. Your balance changes once the store checks it.</p>
+      <form id="proofForm"><label>Amount paid (₱)<input id="pf-amt" type="number" inputmode="decimal" min="0.01" step="0.01" required></label>
+      <label>How you paid<select id="pf-method">${["GCash","Maya","Bank transfer","Other"].map(m=>`<option>${m}</option>`).join("")}</select></label>
+      <label>Reference number<input id="pf-ref" maxlength="80"></label><label>Date paid<input id="pf-date" type="date" required value="${today()}" max="${today()}"></label>
+      <label>Photo of your receipt<input id="pf-file" type="file" accept="image/*" multiple required></label>
+      <button class="btn" id="pf-send" type="submit">Send to the store</button></form></section>
+      ${list.length?`<div class="list">${list.map(p=>`<div class="row"><div><b>${P(p.amount)}</b><span class="small muted"> ${esc(p.method)}${p.ref?" · Ref "+esc(p.ref):""}</span>${p.reason?`<div class="small">${esc(p.reason)}</div>`:""}${p.txnNo?`<div class="small muted">Receipt ${esc(p.txnNo)}</div>`:""}</div><span class="pill ${P_L[p.status][1]}">${P_L[p.status][0]}</span></div>`).join("")}</div>`:""}`;
+  }
   if(S.tab==="catalog"){ const pct=d.discountPct!=null&&d.discountPct!==""?Number(d.discountPct):Number(s.discountPct??25); const q=S.q.toLowerCase();
     const list=S.products.filter(p=>!q||[p.name,p.code,p.category].join(" ").toLowerCase().includes(q)).sort((a,b)=>a.name.localeCompare(b.name));
     html+=`<label style="margin-bottom:12px">Search products<input id="q" type="search" value="${esc(S.q)}" placeholder="Name, code or category"></label>
@@ -284,6 +293,11 @@ document.addEventListener("click",e=>{
 });
 document.addEventListener("input",e=>{ if(e.target.id==="q"){ S.q=e.target.value; render(); } });
 document.addEventListener("change",e=>{ const pid=e.target.dataset&&e.target.dataset.setq; if(pid){ const q=Math.max(0,Math.round(Number(e.target.value)||0)); if(q) S.cart.set(pid,q); else S.cart.delete(pid); saveCart(); render(); } });
+document.addEventListener("submit",async e=>{ if(e.target.id!=="proofForm") return; e.preventDefault(); const b=$("#pf-send"); b.disabled=true; b.textContent="Sending…";
+  try{ const photos=[]; for(const f of $("#pf-file").files){ const r=await fetch("/api/portal/proofs/photo",{method:"POST",credentials:"same-origin",headers:{"Content-Type":f.type},body:f}); const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(d.message||"That picture couldn't be uploaded."); photos.push(d.id); }
+    await api("POST","/api/portal/proofs",{amount:Number($("#pf-amt").value),method:$("#pf-method").value,ref:$("#pf-ref").value,date:$("#pf-date").value,photos});
+    toast("Sent. The store will check it."); document.activeElement.blur(); await load(); }
+  catch(err){ toast(err.message); b.disabled=false; b.textContent="Send to the store"; } });
 document.addEventListener("submit",async e=>{ if(e.target.id!=="pw") return; e.preventDefault(); const b=e.target.querySelector("button"); b.disabled=true;
   try{ await api("POST","/api/me/password",{current:$("#pw1").value,next:$("#pw2").value}); toast("Password changed"); e.target.reset(); }catch(err){ toast(err.message); } b.disabled=false; });
 $("#logout").addEventListener("click",()=>api("POST","/api/logout").finally(()=>location.href="/login"));
@@ -304,10 +318,10 @@ function openHash(){
 }
 async function load(){
   try{
-    const [me,dealers,txns,products,settings,orders]=await Promise.all([api("GET","/api/me"),api("GET","/api/c/dealers"),api("GET","/api/c/txns"),api("GET","/api/c/products"),api("GET","/api/c/settings"),api("GET","/api/c/orders")]);
-    S.orders=orders.map(r=>({...r.data,_id:r.id}));
+    const [me,dealers,txns,products,settings,orders,proofs]=await Promise.all([api("GET","/api/me"),api("GET","/api/c/dealers"),api("GET","/api/c/txns"),api("GET","/api/c/products"),api("GET","/api/c/settings"),api("GET","/api/c/orders"),api("GET","/api/c/proofs")]);
+    S.orders=orders.map(r=>({...r.data,_id:r.id})); S.proofs=proofs.map(r=>({...r.data,_id:r.id}));
     S.me=me; S.dealer=dealers[0]?dealers[0].data:null; S.txns=txns.map(r=>({...r.data,_id:r.id})); S.products=products.map(r=>({...r.data,_id:r.id})); for(const k of [...S.cart.keys()]) if(!S.products.find(p=>p._id===k)) S.cart.delete(k); S.settings=settings[0]?settings[0].data:{};
-    $("#sync").textContent="Updated "+new Date().toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"}); render();
+    $("#sync").textContent="Updated "+new Date().toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"}); if(!(document.activeElement&&document.activeElement.closest("#proofForm"))) render();
     if(!hashOpened){ hashOpened=true; openHash(); }
   }catch(e){ $("#sync").textContent="Couldn't load your account. Check your internet connection."; }
 }

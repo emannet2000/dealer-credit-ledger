@@ -22,7 +22,7 @@ test("upgrading an older database keeps accounts and sessions", () => {
     PRAGMA user_version = 1;`);
   old.close();
   const db = openDb(d);
-  assert.equal(db.pragma("user_version", { simple: true }), 4);
+  assert.equal(db.pragma("user_version", { simple: true }), 5);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM users").get().n, 1);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM sessions").get().n, 1, "sessions survive the upgrade");
   db.prepare("INSERT INTO users (id, username, name, role, password_hash, active, created_at, dealer_id) VALUES ('u2','m','M','dealer','x',1,1,'d1')").run();

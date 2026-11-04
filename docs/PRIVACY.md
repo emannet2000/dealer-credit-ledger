@@ -8,12 +8,16 @@ This guide covers what the Dealer Credit Ledger stores about people, the tools i
 |---|---|---|
 | Dealers and prospects | Name (first, middle, last), mobile, email, Messenger link, birthday, gender, area and address, source and referrer, tags, notes, consent record | Owner, editors and staff. Viewers see names and balances only. |
 | Dealers | Credit sales, payments, returns, adjustments, orders, approval requests | Owner, editors, staff, viewers; each dealer sees only their own in the portal |
+| Dealers | Photos of payment receipts sent through the portal | Owner, editors, staff and that dealer only |
+| Dealers | Log of automatic reminders, with the number or email used | Owner, editors and staff |
 | Contact log | Calls, visits, messages and notes about a dealer | Owner, editors and staff (not viewers, not the dealer) |
 | Team and portal accounts | Name, username, password hash, role, two-step sign-in secret | Owner |
 | Activity log | Who did what and when, including who opened a dealer's profile | Owner and editors |
 
 Data is kept in `DATA_DIR` (database, photos, daily backups). Phones used offline keep a copy of dealers, transactions and store settings, without birthdays, email or addresses; it is wiped on sign-out or when the owner signs that person out everywhere.
 
+
+**Automatic reminders** send the dealer's mobile number or email and the amount due to the SMS or email provider you connect. **Check:** that provider handles personal data for you, so review its terms and record it as a processor. A dealer can be opted out in the dealer form.
 
 Birthday and gender are optional. Birthday is used to confirm who someone is and to greet them; gender is used to address them correctly. Age is never stored: the app works it out from the birthday when it is shown. **Check:** if you have no use for gender, leave it blank, because the Act asks you to collect only what you need.
 

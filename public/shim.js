@@ -274,6 +274,8 @@
   /* ---------- account helpers used by the Store tab ---------- */
   window.APP = Object.freeze({
     node: true,
+    call: (method, url, body) => api(method, url, body),
+    newId: () => crypto.randomUUID().replace(/-/g, "").slice(0, 20),
     me: () => { meP = null; return me(); },
     users: () => users(true),
     createUser: (u) => api("POST", "/api/users", u).then((r) => (users(true), r)),

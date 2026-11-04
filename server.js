@@ -19,7 +19,7 @@ if (process.env.NODE_ENV === "production" && String(process.env.COOKIE_SECURE) !
 }
 
 const { createApp } = require("./lib/app");
-const { app, close, backupNow, dataDir } = createApp({ dataDir: process.env.DATA_DIR || path.join(__dirname, "data") });
+const { app, close, backupNow, runReminders, dataDir } = createApp({ dataDir: process.env.DATA_DIR || path.join(__dirname, "data") });
 const port = Number(process.env.PORT) || 3000;
 
 const server = app.listen(port, () => {
@@ -32,8 +32,15 @@ const runBackup = () => backupNow().then((f) => console.log(`Backup saved: ${f}`
 const first = setTimeout(runBackup, 60e3);
 const daily = setInterval(runBackup, 24 * 3600e3);
 
+// Payment reminders go out during the day; each one is sent only once.
+const remind = () => {
+  const hour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: process.env.TZ, hour: "2-digit", hour12: false }).format(new Date()));
+  if (hour >= 9 && hour < 18) runReminders().catch((e) => console.error("Reminders failed:", e.message));
+};
+const hourly = setInterval(remind, 3600e3);
+
 function shutdown() {
-  clearTimeout(first); clearInterval(daily);
+  clearTimeout(first); clearInterval(daily); clearInterval(hourly);
   server.close(() => { close(); process.exit(0); });
   setTimeout(() => process.exit(0), 5000).unref();
 }

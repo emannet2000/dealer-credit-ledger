@@ -117,6 +117,93 @@ test("adding a dealer or product shows the existing record and can open it", { s
   assert.equal(await count("products"), products + 1, "the second press saves anyway");
 });
 
+test("dealer name boxes line up, and age follows the birthday", { skip }, async () => {
+  await b.signIn(app.base, app.jar.owner);
+  await b.click(".tab[data-view=dealers]");
+  await b.click("[data-act=new-dealer]");
+  await b.waitFor("document.querySelector('#d-first')");
+  const tops = await b.ev("['#d-first','#d-middle','#d-last'].map(s=>Math.round(document.querySelector(s).getBoundingClientRect().top))");
+  assert.equal(new Set(tops).size, 1, `name boxes at ${tops}`);
+  const heights = await b.ev("['#d-gender','#d-bday'].map(s=>Math.round(document.querySelector(s).getBoundingClientRect().height))");
+  assert.equal(new Set(heights).size, 1, `field heights ${heights}`);
+  await b.fill("#d-bday", "1990-05-05");
+  assert.match(await b.text("#d-age-hint"), /^Age \d+$/);
+  await b.click("[data-back]");
+});
+
+test("close the day from the Cash tab", { skip }, async () => {
+  const date = day(-1);
+  await app.api("owner", "PUT", "/api/c/txns/e2e-pay", { data: { type: "payment", dealerId: "late", date, amount: 120, method: "Cash" } });
+  await b.signIn(app.base, app.jar.owner);
+  await b.waitFor("/not closed yet/.test(document.querySelector('#main').innerText)");
+  await b.click(".tab[data-view=cash]");
+  await b.click(`[data-act=ops-close][data-id="${date}"]`);
+  await b.waitFor("document.querySelector('#c-Cash')");
+  await b.fill("#c-Cash", "100");
+  assert.match(await b.text("#c-total"), /Overall difference/);
+  await b.fill("#c-note", "Gave change");
+  await b.click("#f button[type=submit]");
+  await b.waitFor("[...document.querySelectorAll('#main td')].some(td=>/Gave change/.test(td.innerText))");
+  assert.deepEqual(b.errors, []);
+  const closed = (await app.api("owner", "GET", "/api/c/cashcloses")).data.find((c) => c.id === date);
+  assert.equal(closed.data.diff, -20);
+});
+
+test("a post-dated check is held, then bounced from the Cash tab", { skip }, async () => {
+  await b.signIn(app.base, app.jar.owner);
+  await b.click("[data-act=new-pay]");
+  await b.fill("#y-dealer", "late");
+  await b.waitFor("document.querySelector('#y-check')?.hidden===true");
+  await b.fill("#y-method", "Check");
+  await b.waitFor("document.querySelector('#y-check')?.hidden===false");
+  await b.fill("#y-amt", "100"); await b.fill("#y-bank", "BDO"); await b.fill("#y-chkno", "555"); await b.fill("#y-chkdate", day(14));
+  await b.click("#f button[type=submit]");
+  const find = async () => (await txns()).find((t) => t.data.check && t.data.check.number === "555");
+  for (let i = 0; i < 50 && !(await find()); i++) await new Promise((r) => setTimeout(r, 100));
+  assert.equal((await find()).data.check.status, "pending");
+  await b.ev("document.querySelector('[data-close]')?.click()");
+  await b.click(".tab[data-view=cash]");
+  await b.click("[data-act=ops-check-bad]");
+  await b.fill("#r-why", "No funds"); await b.fill("#b-fee", "50");
+  await b.click("#f button[type=submit]");
+  await b.waitFor("/No checks waiting/.test(document.querySelector('#main').innerText)");
+  assert.equal((await find()).data.check.status, "bounced");
+  assert.deepEqual(b.errors, []);
+});
+
+test("order from a supplier and receive it from the Buying tab", { skip }, async () => {
+  await app.api("owner", "PUT", "/api/c/suppliers/sup1", { data: { name: "Acme Trading", terms: 30 } });
+  await b.signIn(app.base, app.jar.owner);
+  await b.click(".tab[data-view=buying]");
+  await b.click("[data-act=ops-po]");
+  await b.fill("#o-sup", "sup1");
+  await b.fill("[data-l=p]", "p1"); await b.fill("[data-l=q]", "5"); await b.fill("[data-l=c]", "40");
+  assert.match(await b.text("#o-total"), /200/);
+  await b.click("#f button[value=ordered]");
+  await b.waitFor("document.querySelector('[data-act=ops-receive]')");
+  const before = await stock();
+  await b.click("[data-act=ops-receive]");
+  await b.fill("#g-inv", "INV-1"); await b.fill("#g-amt", "200");
+  await b.click("#f button[type=submit]");
+  await b.waitFor("[...document.querySelectorAll('#main h2')].some(h=>h.innerText==='Supplier invoices')");
+  assert.equal(await stock(), before + 5);
+  assert.deepEqual(b.errors, []);
+});
+
+test("close the books from the Store tab", { skip }, async () => {
+  await b.signIn(app.base, app.jar.owner);
+  await b.click(".tab[data-view=store]");
+  await b.click("[data-act=ops-books-close]");
+  await b.fill("#b-date", day(-200));
+  await b.click("#f button[type=submit]");
+  await b.waitFor("/Closed through/.test(document.querySelector('#main').innerText)");
+  await b.click("[data-act=ops-books-open]");
+  await b.fill("#r-why", "Test finished");
+  await b.click("#f button[type=submit]");
+  await b.waitFor("/No period is closed|Reopened/.test(document.querySelector('#main').innerText)");
+  assert.deepEqual(b.errors, []);
+});
+
 test("the owner gives a dealer portal access and the dealer signs in", { skip }, async () => {
   await b.signIn(app.base, app.jar.owner);
   await b.click(".tab[data-view=store]");
@@ -129,4 +216,12 @@ test("the owner gives a dealer portal access and the dealer signs in", { skip },
   await b.fill("#username", "ana"); await b.fill("#password", "anapass123"); await b.click("#go");
   await b.waitFor("/Hi, Ana/.test(document.body.innerText)", 15000).catch(async (e) => { throw new Error(e.message + " | page: " + (await b.ev("location.pathname + ' ' + document.body.innerText.slice(0,300)"))); });
   assert.match(await b.text("body"), /YOUR BALANCE/i);
+  await b.click("[data-tab=proof]");
+  await b.waitFor("document.querySelector('#proofForm')");
+  await b.fill("#pf-amt", "50"); await b.fill("#pf-ref", "GC-77");
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+  await b.ev(`(()=>{ const bytes=Uint8Array.from(atob(${JSON.stringify(png)}),c=>c.charCodeAt(0)), dt=new DataTransfer(); dt.items.add(new File([bytes],"r.png",{type:"image/png"})); document.querySelector("#pf-file").files=dt.files; })()`);
+  await b.click("#pf-send");
+  await b.waitFor("/Waiting for the store/.test(document.body.innerText)");
+  assert.deepEqual(b.errors, []);
 });

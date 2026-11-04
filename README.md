@@ -69,6 +69,8 @@ Open http://localhost:3000. The first visit asks you to create the **owner** acc
 | Setting | Default | What it does |
 |---|---|---|
 | `PORT` | `3000` | Web server port |
+| `REMINDER_WEBHOOK_URL` | none | Your SMS or email gateway. The app POSTs `{ channel, to, message }` as JSON. Reminders fail visibly until this is set. |
+| `REMINDER_WEBHOOK_TOKEN` | none | Sent to the gateway as a bearer token |
 | `DATA_DIR` | `./data` | Where the database, photos and daily backups are stored. **Back up this folder.** |
 | `COOKIE_SECURE` | `false` | Set to `true` when the site uses HTTPS. Also turns on the HTTPS redirect and HSTS. **Required when `NODE_ENV=production`.** |
 | `ALLOW_INSECURE_HTTP` | — | Set to `true` only to try the production build on a local network without HTTPS. Never on a public server. |
@@ -225,12 +227,14 @@ The tests cover sign-in, roles and permissions, DR/OR numbering, atomic stock ch
 
 ```
 server.js            starts the web server and daily backups
-REQUIREMENTS.md      the 70 functional requirements and acceptance criteria
+REQUIREMENTS.md      the 88 functional requirements and acceptance criteria
 lib/app.js           API, sign-in, roles and business rules
-lib/credit.js        balance and overdue rules (oldest delivery paid first)
+lib/credit.js        balance and overdue rules, shared by the server, staff app and portal
 lib/db.js            SQLite database and migrations
+lib/ops.js           cash close, collectors, checks, reminders, proof of payment, purchasing
 public/index.html    the staff app page
 public/app.js        the staff app screens
+public/ops.js        the Cash and Buying screens, and the books and reminder panels
 public/app.css       the staff app styles
 lib/credit.js        balance rules, shared by the server, staff app and portal
 public/shim.js       connects the screens to the API (live updates, photos, downloads)
