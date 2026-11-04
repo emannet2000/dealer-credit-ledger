@@ -200,6 +200,7 @@ test("order from a supplier and receive it from the Buying tab", { skip }, async
 test("close the books from the Store tab", { skip }, async () => {
   await b.signIn(app.base, app.jar.owner);
   await b.click(".tab[data-view=store]");
+  await b.click('[data-store-tab="Money rules"]');
   await b.click("[data-act=ops-books-close]");
   await b.fill("#b-date", day(-200));
   await b.click("#f button[type=submit]");
@@ -234,6 +235,7 @@ test("put a charge on a payment plan and post a dispute from the Cash tab", { sk
 test("set tax details and print a VAT breakdown on the receipt", { skip }, async () => {
   await b.signIn(app.base, app.jar.owner);
   await b.click(".tab[data-view=store]");
+  await b.click('[data-store-tab="Money rules"]');
   await b.fill("#fn-tin", "123-456-789"); await b.ev("document.querySelector('#fn-vat').click()");
   await b.ev("document.querySelector('#finForm').requestSubmit()");
   for (let i = 0; i < 50; i++) { const s = (await app.api("owner", "GET", "/api/c/settings")).data.find((d) => d.id === "store"); if (s.data.tax && s.data.tax.vatRegistered) break; await new Promise((r) => setTimeout(r, 100)); }
@@ -245,6 +247,19 @@ test("set tax details and print a VAT breakdown on the receipt", { skip }, async
   assert.match(await b.text("#rcpt"), /TIN 123-456-789[\s\S]*not an official receipt/i);
   await app.api("owner", "PUT", "/api/c/settings/store", { data: { storeName: "E2E Store", discountPct: 25, holdDays: 60 } });
   await b.ev("document.querySelector('[data-close]')?.click()");
+  assert.deepEqual(b.errors, []);
+});
+
+test("Store shows one section at a time, and the overview leads with the numbers", { skip }, async () => {
+  await b.signIn(app.base, app.jar.owner);
+  const kpi = await b.ev("document.querySelector('#main .kpis').getBoundingClientRect().top"), todo = await b.ev("document.querySelector('#main .todo')?.getBoundingClientRect().top ?? 9999");
+  assert.ok(kpi < todo, "the numbers come before the to-do list");
+  await b.click(".tab[data-view=store]");
+  const seen = () => b.ev("[...document.querySelectorAll('#main section.panel')].filter(p=>!p.hidden).map(p=>p.querySelector('h2').textContent.trim())");
+  assert.deepEqual(await seen(), ["Store details"]);
+  await b.click("[data-store-tab=System]");
+  await b.waitFor("[...document.querySelectorAll('#main section.panel')].some(p=>!p.hidden&&p.querySelector('h2').textContent.startsWith('This device'))");
+  for (const t of await seen()) assert.ok(!/^Store details|^Team accounts/.test(t), t);
   assert.deepEqual(b.errors, []);
 });
 
@@ -262,6 +277,7 @@ test("every screen opens without an error, as owner and as staff", { skip }, asy
 test("the owner gives a dealer portal access and the dealer signs in", { skip }, async () => {
   await b.signIn(app.base, app.jar.owner);
   await b.click(".tab[data-view=store]");
+  await b.click("[data-store-tab=Team]");
   await b.click("[data-act=new-portal]");
   await b.fill("#u-dealer", "d1"); await b.fill("#u-user", "ana"); await b.fill("#u-pw", "anapass123");
   await b.click("#f button[type=submit]");

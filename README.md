@@ -71,6 +71,8 @@ Open http://localhost:3000. The first visit asks you to create the **owner** acc
 | `PORT` | `3000` | Web server port |
 | `REMINDER_WEBHOOK_URL` | none | Your SMS or email gateway. The app POSTs `{ channel, to, message }` as JSON. Reminders fail visibly until this is set. |
 | `REMINDER_WEBHOOK_TOKEN` | none | Sent to the gateway as a bearer token |
+| `PUSH_CONTACT` | none | A `mailto:` or `https:` address for phone notifications |
+| `API_RATE_LIMIT` | `3000` | Requests per person per minute |
 | `DATA_DIR` | `./data` | Where the database, photos and daily backups are stored. **Back up this folder.** |
 | `COOKIE_SECURE` | `false` | Set to `true` when the site uses HTTPS. Also turns on the HTTPS redirect and HSTS. **Required when `NODE_ENV=production`.** |
 | `ALLOW_INSECURE_HTTP` | — | Set to `true` only to try the production build on a local network without HTTPS. Never on a public server. |
@@ -184,6 +186,11 @@ Lists show the most important 100 rows first, with a button to show more.
 | Command | What it runs |
 |---|---|
 | `npm test` | API tests and tests of the browser's business logic (settlement, aging, statements, payment allocation), including a check that browser and server settle every ledger the same way |
+| `npm run test:unit` | Pure functions, with no server |
+| `npm run test:property` | Rules checked against thousands of random inputs (`PROPERTY_RUNS=5000` for a longer run) |
+| `npm run test:edge` | Hostile, broken and extreme input |
+| `npm run test:functional` | Every feature through the real API |
+| `npm run test:coverage` | All of the above, with a coverage table |
 | `npm run test:e2e` (set `CHROME_PATH` if Chrome isn't found) | Browser tests in headless Chrome: credit sale, payment, offline payment, approval request (skipped without `CHROME_PATH`) |
 | `npm run test:all` | Both |
 
@@ -231,7 +238,9 @@ REQUIREMENTS.md      the 88 functional requirements and acceptance criteria
 lib/app.js           API, sign-in, roles and business rules
 lib/credit.js        balance and overdue rules, shared by the server, staff app and portal
 lib/db.js            SQLite database and migrations
-lib/ops.js           cash close, collectors, checks, reminders, proof of payment, purchasing
+lib/ops.js           cash close, collectors, checks, reminders, proof of payment, purchasing, merging
+lib/finance.js       payment plans, late fees, costing, lots, delivery, VAT, credit reviews, disputes
+lib/push.js          phone notifications
 public/index.html    the staff app page
 public/app.js        the staff app screens
 public/ops.js        the Cash and Buying screens, and the books and reminder panels

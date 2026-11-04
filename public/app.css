@@ -370,3 +370,16 @@ dl.kv dd{margin:0;overflow-wrap:anywhere}
   html[data-paper="58"] .receipt{font-size:10px}
   html[data-paper="58"] .rc-tbl{font-size:9px}
 }
+/* Overview to-do list: one compact line each, so the numbers stay near the top */
+html{scrollbar-gutter:stable}
+.todo .notice{background:none;border-radius:0;margin:0;padding:9px 0 9px 16px;border-top:1px solid var(--line);position:relative;font-size:14px}
+.todo .notice::before{content:"";position:absolute;left:0;top:50%;width:8px;height:8px;margin-top:-4px;border-radius:50%;background:var(--accent)}
+.todo .notice.warn::before{background:#c77700}
+.todo .notice.bad::before{background:var(--bad)}
+.todo-more summary{cursor:pointer;font-weight:600;font-size:14px;padding:10px 0 2px;color:var(--accent);border-top:1px solid var(--line)}
+/* Store sections: one readable column at a time */
+.store-sections .grid2e{display:block;max-width:820px}
+.store-sections .grid2e>div,.store-sections .stack{display:contents}
+.store-sections .panel{max-width:820px;margin-bottom:16px}
+.store-seg{margin-bottom:16px;display:flex;width:fit-content;max-width:100%}
+.store-seg [aria-pressed=true]{background:var(--accent);color:var(--accent-fg)}

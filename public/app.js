@@ -366,6 +366,7 @@ function render(){
   $("#main").innerHTML=({overview:vOverview,orders:vOrders,collect:vCollect,dealers:vDealers,products:vProducts,activity:vActivity,reports:vReports,store:vStore,dash:vDash,...window.LedgerOps.views}[S.view]||vOverview)();
   if(S.view==="dash"&&S.canAdmin){ const D=dashData(); mountBars("dashChart",D.series); }
   if(S.view==="reports") mountTrend();
+  if(S.view==="store") window.LedgerOps.storeSections();
   if(fid){ const el=document.getElementById(fid); if(el){ el.focus(); try{ if(pos!=null) el.setSelectionRange(pos,pos);}catch(e){} } }
 }
 function sampleBanner(){
@@ -391,13 +392,14 @@ function vOverview(){
   const segs=[["current","Not yet due","var(--accent)"],["d30","1–30 days late","var(--warn)"],["d60","31–60 days","#d97a2b"],["d90","61–90 days","var(--bad)"],["d90p","Over 90 days","#7a1712"]];
   const low=activeProducts().filter(([,p])=>p.reorderLevel!=null&&p.stock<=p.reorderLevel).sort((a,b)=>a[1].stock-b[1].stock);
   const mn=new Date().toLocaleDateString("en-PH",{month:"long"});
-  return sampleBanner()+offlineNotices()+approvalNotices()+healthNotices()+`
+  return sampleBanner()+offlineNotices()+approvalNotices()+`
   <div class="kpis">
     <div class="kpi"><div class="lbl">Total receivables</div><div class="val num">${P(total)}</div><div class="sub">Owed by ${owing} dealer${owing===1?"":"s"}</div></div>
     <div class="kpi ${overdue>0?"bad":""}"><div class="lbl">Overdue</div><div class="val num">${P(overdue)}</div><div class="sub">${od.length} dealer${od.length===1?"":"s"} past due</div></div>
     <div class="kpi"><div class="lbl">Collected in ${mn}</div><div class="val num">${P(payM)}</div><div class="sub">Payments received</div></div>
     <div class="kpi"><div class="lbl">Credit sales in ${mn}</div><div class="val num">${P(salesM)}</div><div class="sub">Released to dealers</div></div>
   </div>
+    ${todoPanel()}
   <div class="grid2">
     <div class="col">
       <section class="panel">
@@ -714,6 +716,14 @@ function heldSheet(){
       $$("[data-held-confirm]",sh).forEach(b=>b.addEventListener("click",()=>guarded(b,async()=>{ await window.APP.retryHeld(b.dataset.heldConfirm,true); toast(offState().held.some(h=>h.id===b.dataset.heldConfirm)?"Still refused":"Payment recorded"); paintSheet(true); })));
       $$("[data-held-discard]",sh).forEach(b=>b.addEventListener("click",()=>{ if(armed(b,"Tap again to discard")) guarded(b,async()=>{ await window.APP.discardHeld(b.dataset.heldDiscard); toast("Payment discarded"); paintSheet(true); }); }));
     }]; },true);
+}
+// The overview's to-do list: the most urgent first, and only a few until asked for more.
+function todoPanel(){
+  const items=healthNotices().split(/(?=<div class="notice )/).filter(x=>x.trim());
+  if(!items.length) return "";
+  const rank=x=>/notice bad/.test(x)?0:/notice warn/.test(x)?1:2, sorted=items.sort((a,b)=>rank(a)-rank(b)), MAX=4, more=sorted.length-MAX;
+  return `<section class="panel todo" style="margin-bottom:20px"><div class="panel-head"><h2>To do <span class="pill ${rank(sorted[0])===0?"bad":"warn"}">${items.length}</span></h2></div>
+    ${sorted.slice(0,MAX).join("")}${more>0?`<details class="todo-more"><summary>Show ${more} more</summary>${sorted.slice(MAX).join("")}</details>`:""}</section>`;
 }
 function healthNotices(){
   const out=[window.LedgerOps.notices()];
@@ -2104,7 +2114,7 @@ function restoreFlow(file){
 
 /* ================= team accounts (Node.js server) ================= */
 const ROLE_L={owner:"Owner",editor:"Editor",staff:"Staff",viewer:"Viewer",dealer:"Dealer portal"};
-async function loadTeam(){ try{ S.acct=await window.APP.me(); S.team=await window.APP.users(); $("#acct").innerHTML=`Signed in as <b>${esc(S.acct.name)}</b> (${esc(ROLE_L[S.acct.role]||S.acct.role)}) · <button class="linkbtn" data-act="logout" type="button">Sign out</button>`; render(); loadBackupStatus(); }catch(e){} }
+async function loadTeam(){ try{ S.acct=await window.APP.me(); S.team=await window.APP.users(); $("#acct").innerHTML=`Signed in as <b>${esc(S.acct.name)}</b>${S.acct.name===(ROLE_L[S.acct.role]||S.acct.role)?"":` (${esc(ROLE_L[S.acct.role]||S.acct.role)})`} · <button class="linkbtn" data-act="logout" type="button">Sign out</button>`; render(); loadBackupStatus(); }catch(e){} }
 // Server backup health for owners and editors (FR-067, PR-08).
 async function loadBackupStatus(){ if(!window.APP||!window.APP.backupStatus||!S.acct||!["owner","editor"].includes(S.acct.role)) return; try{ S.backup=await window.APP.backupStatus(); render(); }catch(e){} }
 setInterval(loadBackupStatus,3600e3);

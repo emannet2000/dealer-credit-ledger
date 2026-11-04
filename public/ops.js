@@ -37,7 +37,7 @@ function notices() {
   if (voids) note("warn", `<b>${voids} void${voids === 1 ? "" : "s"} waiting for your approval.</b>`, "Review", "go-cash");
   if (remits) note("warn", `<b>${remits} remittance${remits === 1 ? "" : "s"} with a difference.</b>`, "Review", "go-cash");
   if (due) note("info", `<b>${due} check${due === 1 ? "" : "s"} ready for deposit.</b>`, "See checks", "go-cash");
-  if (fails) note("warn", `<b>${fails} reminder${fails === 1 ? "" : "s"} failed to send.</b>`, "See reminders", "go-store");
+  if (fails) note("warn", `<b>${fails} reminder${fails === 1 ? "" : "s"} failed to send.</b>`, "See reminders", "ops-go-money");
   return out.join("");
 }
 
@@ -98,7 +98,7 @@ function expensePanel() {
   const from = today().slice(0, 8) + "01", list = expensesInRange(from, today()).sort((a, b) => b[1].date.localeCompare(a[1].date)), total = r2(list.reduce((a, [, e]) => a + e.amount, 0));
   return panel(`Expenses this month${list.length ? ` <span class="small muted">${P(total)}</span>` : ""}`, list.length ? table(`<th>Day</th><th>For</th><th class="r">Amount</th><th></th>`, list.slice(0, 25).map(([id, e]) =>
     `<tr><td class="nowrap">${fmtDate(e.date)}</td><td><b>${esc(e.category)}</b><div class="small muted">${esc([e.payee, e.method, e.note].filter(Boolean).join(" · "))}</div></td><td class="r num">${P(e.amount)}</td><td class="r"><button class="btn sm" data-act="ops-exp" data-id="${esc(id)}" type="button">Edit</button></td></tr>`).join("")) : none("No expenses recorded this month."),
-    `<button class="btn sm primary" data-act="ops-exp" type="button">+ Expense</button>`);
+    `<button class="btn sm" data-act="ops-exp" type="button">+ Expense</button>`);
 }
 const EXP_CATS = ["Rent", "Salaries", "Fuel and transport", "Utilities", "Supplies", "Repairs", "Taxes and fees", "Other"];
 function expenseForm(id) {
@@ -127,7 +127,7 @@ function planPanel() {
   return panel("Payment plans", list.length ? table(`<th>Dealer</th><th>Plan</th><th class="r">Unpaid</th><th class="r">Next</th><th></th>`, list.map(([id, t]) => {
     const o = status(t.dealerId).open.find((x) => x._id === id), parts = o ? Credit.dueParts(t, o.remaining) : [], late = parts.filter((p) => p.due < t0);
     return `<tr><td><b>${esc(dealerName(t.dealerId))}</b><div class="small muted">${esc(t.no || "")}</div></td><td class="small">${t.plan.count} × ${esc(FREQ_L[t.plan.frequency])}${late.length ? ` <span class="pill bad">${late.length} missed</span>` : ""}</td><td class="r num">${P(o ? o.remaining : 0)}</td><td class="r small nowrap">${parts[0] ? `${fmtDate(parts[0].due)}<div class="num">${P(parts[0].amount)}</div>` : `<span class="pill good">Paid</span>`}</td><td class="r">${S.canAdmin ? `<button class="btn sm" data-act="ops-plan-end" data-id="${esc(id)}" type="button">Cancel</button>` : ""}</td></tr>`;
-  }).join("")) : none("No payment plans yet."), S.canAdmin ? `<button class="btn sm primary" data-act="ops-plan" type="button">+ Payment plan</button>` : "");
+  }).join("")) : none("No payment plans yet."), S.canAdmin ? `<button class="btn sm" data-act="ops-plan" type="button">+ Payment plan</button>` : "");
 }
 function planForm() {
   const open = activeDealers().flatMap(([id, d]) => status(id).open.filter((o) => !o.plan && !o.disputed && o.type === "sale").map((o) => ({ o, d })));
@@ -229,9 +229,15 @@ function taxPanel([from, to]) {
   const list = [...months].sort((a, b) => a[0].localeCompare(b[0]));
   return `<div style="margin-bottom:20px">${panel("Tax summary", list.length ? table(`<th>Month</th><th class="r">VATable</th><th class="r">VAT</th><th class="r">Exempt</th><th class="r">Zero-rated</th>`, list.map(([m, v]) => `<tr><td>${esc(m)}</td><td class="r num">${P(v.vatable)}</td><td class="r num">${P(v.vat)}</td><td class="r num">${P(v.exempt)}</td><td class="r num">${P(v.zero)}</td></tr>`).join("")) : none("No taxed sales in this period."), list.length ? `<button class="btn sm" data-act="ops-tax-csv" type="button">Export CSV</button>` : "")}</div>`;
 }
+function cashSummary() {
+  const t0 = today(), paid = rows(S.txns).filter(([, t]) => t.type === "payment" && !t.voided && t.date === t0), inTotal = r2(paid.reduce((a, [, t]) => a + t.amount, 0));
+  const out = r2(expensesInRange(t0, t0).reduce((a, [, e]) => a + e.amount, 0)), checks = openChecks(), disputed = rows(S.disputes).filter(([, d]) => d.status === "open"), proofs = pendingProofs().length;
+  const kpi = (lbl, val, sub, cls = "") => `<div class="kpi ${cls}"><div class="lbl">${lbl}</div><div class="val num">${val}</div><div class="sub">${sub}</div></div>`;
+  return `<div class="kpis" style="margin-bottom:0">${kpi("Collected today", P(inTotal), `${paid.length} payment${paid.length === 1 ? "" : "s"}`)}${kpi("Paid out today", P(out), "Expenses")}${kpi("Checks waiting", P(r2(checks.reduce((a, [, t]) => a + t.amount, 0))), `${checks.length} to deposit`)}${kpi("To review", proofs + disputed.length, `${proofs} proof${proofs === 1 ? "" : "s"}, ${disputed.length} dispute${disputed.length === 1 ? "" : "s"}`)}</div>`;
+}
 function vCash() {
   if (!S.canWrite) return panel("Cash", none("Daily cash work is for the store team."));
-  return `<div class="stack">${S.acct && S.acct.collector ? myRoute() : ""}${signoffPanel()}${remitPanel()}${creditPanel()}<div class="grid2e"><div class="stack">${closePanel()}${expensePanel()}${lateFeePanel()}</div><div class="stack">${proofPanel()}${disputePanel()}${checkPanel()}${planPanel()}</div></div>${collectorReport()}</div>`;
+  return `<div class="stack">${cashSummary()}${S.acct && S.acct.collector ? myRoute() : ""}${signoffPanel()}${remitPanel()}${creditPanel()}<div class="grid2e"><div class="stack">${closePanel()}${expensePanel()}${lateFeePanel()}</div><div class="stack">${proofPanel()}${disputePanel()}${checkPanel()}${planPanel()}</div></div>${collectorReport()}</div>`;
 }
 
 async function closeDay(date) {
@@ -286,7 +292,7 @@ function vBuying() {
   ${bills.length ? panel(`Supplier invoices${owed ? ` <span class="small muted">You owe ${P(owed)}</span>` : ""}`, table(`<th>Invoice</th><th>Supplier</th><th>Due</th><th class="r">Amount</th><th class="r">Unpaid</th><th></th>`, bills.map(({ id, p, i, inv }) => `<tr><td><b>${esc(inv.no)}</b><div class="small muted">${esc(p.no)}</div></td><td>${esc((S.suppliers.get(p.supplierId) || {}).name || "")}</td><td class="nowrap">${inv.dueDate ? fmtDate(inv.dueDate) : "—"}${left(inv) > 0 && inv.dueDate && inv.dueDate < t0 ? ` <span class="pill bad">Overdue</span>` : ""}</td><td class="r num">${P(inv.amount)}</td><td class="r num">${left(inv) > 0 ? P(left(inv)) : `<span class="pill good">Paid</span>`}</td><td class="r">${S.canAdmin && left(inv) > 0 ? `<button class="btn sm" data-act="ops-bill" data-id="${esc(id)}" data-i="${i}" type="button">Pay</button>` : ""}</td></tr>`).join(""))) : ""}
   ${expiryPanel()}${locationPanel()}
   ${panel("Suppliers", `<div class="actions" style="margin-bottom:10px"><input id="sup-q" type="search" placeholder="Search suppliers" aria-label="Search suppliers" value="${esc(S.supQ || "")}" style="flex:1;min-width:160px"><label class="chk"><input type="checkbox" data-act="ops-sup-all" ${S.supAll ? "checked" : ""}> Show archived</label></div>
-    ${sup.length ? table(`<th>Supplier</th><th>Contact</th><th class="r">Terms</th><th></th>`, sup.map(([id, s]) => `<tr><td><b>${esc(s.name)}</b>${s.active === false ? ` <span class="pill neutral">Archived</span>` : ""}</td><td class="small">${esc(s.contact)}${s.phone ? ` · ${esc(s.phone)}` : ""}</td><td class="r num">${s.terms} days</td><td class="r">${S.canAdmin ? `<button class="btn sm" data-act="ops-sup" data-id="${esc(id)}" type="button">Edit</button>` : ""}</td></tr>`).join("")) : none("No suppliers to show.")}`, S.canAdmin ? `<button class="btn sm primary" data-act="ops-sup" type="button">+ Supplier</button>` : "")}</div>`;
+    ${sup.length ? table(`<th>Supplier</th><th>Contact</th><th class="r">Terms</th><th></th>`, sup.map(([id, s]) => `<tr><td><b>${esc(s.name)}</b>${s.active === false ? ` <span class="pill neutral">Archived</span>` : ""}</td><td class="small">${esc(s.contact)}${s.phone ? ` · ${esc(s.phone)}` : ""}</td><td class="r num">${s.terms} days</td><td class="r">${S.canAdmin ? `<button class="btn sm" data-act="ops-sup" data-id="${esc(id)}" type="button">Edit</button>` : ""}</td></tr>`).join("")) : none("No suppliers to show.")}`, S.canAdmin ? `<button class="btn sm" data-act="ops-sup" type="button">+ Supplier</button>` : "")}</div>`;
 }
 function billForm(id, i) {
   const p = S.purchases.get(id), inv = p.receipts[i].invoice, due = r2(inv.amount - (inv.paid || 0));
@@ -305,7 +311,7 @@ function locationPanel() {
   const cells = (p) => { const at = p.stockAt || {}, out = Number(p.stock) - Object.values(at).reduce((a, v) => a + Number(v), 0); return `<td class="r num">${out}</td>${locs.map(([k]) => `<td class="r num">${at[k] || "—"}</td>`).join("")}`; };
   return panel("Stock locations", `${locs.length ? `<p class="small" style="margin-top:0">Stock not moved anywhere stays at the Main store.</p>` : none("Add a warehouse, van or collector here to track where stock is.")}
     ${locs.length && placed.length ? table(`<th>Product</th><th class="r">Main store</th>${locs.map(([, l]) => `<th class="r">${esc(l.name)}</th>`).join("")}`, placed.map(([, p]) => `<tr><td><b>${esc(p.name)}</b></td>${cells(p)}</tr>`).join("")) : ""}`,
-    `<div class="actions">${locs.length ? `<button class="btn sm primary" data-act="ops-move" type="button">Move stock</button>` : ""}${S.canAdmin ? `<button class="btn sm" data-act="ops-loc" type="button">+ Location</button>` : ""}</div>`);
+    `<div class="actions">${locs.length ? `<button class="btn sm" data-act="ops-move" type="button">Move stock</button>` : ""}${S.canAdmin ? `<button class="btn sm" data-act="ops-loc" type="button">+ Location</button>` : ""}</div>`);
 }
 function moveForm() {
   const locs = rows(S.locations).filter(([, l]) => l.active !== false), opt = `<option value="">Main store</option>${locs.map(([k, l]) => `<option value="${esc(k)}">${esc(l.name)}</option>`).join("")}`;
@@ -475,6 +481,18 @@ function passwordPanel(owner) {
   const list = S.pwRequests || [];
   return list.length ? `<div class="stack" style="margin-bottom:16px">${panel("Forgot password", table(`<th>Person</th><th>Asked</th><th></th>`, list.map((r) => `<tr><td><b>${esc(r.name)}</b><div class="small muted">${esc(r.username)}</div></td><td class="small">${fmtStamp(r.at)}</td><td class="r"><button class="btn sm" data-act="edit-user" data-id="${esc(r.id)}" type="button">Set new password</button></td></tr>`).join("")))}</div>` : "";
 }
+// Store holds a lot of settings, so it is split into sections by what they are for.
+const STORE_GROUPS = [["Store", ["Store details"]], ["Money rules", ["Close the books", "Staff limits", "Fees, costing and tax", "Automatic payment reminders"]],
+  ["Team", ["Team accounts", "Dealer portal", "Collector routes", "Forgot password", "Your account"]], ["System", ["This device", "System health", "Server backups", "Backup and restore", "Ledger health", "Activity log"]]];
+const groupOf = (title) => (STORE_GROUPS.find(([, l]) => l.some((t) => title.startsWith(t))) || STORE_GROUPS[0])[0];
+function storeSections() {
+  const main = $("#main"), tab = S.storeTab || "Store";
+  main.classList.add("store-sections");
+  $$("section.panel", main).forEach((p) => { p.hidden = groupOf(p.querySelector("h2")?.textContent.trim() || "") !== tab; });
+  main.insertAdjacentHTML("afterbegin", `<div class="seg store-seg" role="group" aria-label="Store sections">${STORE_GROUPS.map(([n]) => `<button type="button" data-store-tab="${esc(n)}" aria-pressed="${n === tab}">${esc(n)}</button>`).join("")}</div>`);
+}
+document.addEventListener("click", (e) => { const b = e.target.closest("[data-store-tab]"); if (b) { S.storeTab = b.dataset.storeTab; render(); window.scrollTo(0, 0); } });
+const goStore = (tab) => { S.storeTab = tab; window.LedgerUI.goView("store"); };
 const storePanels = () => { if (S.canAdmin && !S.healthAsked) { S.healthAsked = true; loadHealth(); } return `<div class="stack" style="margin-bottom:16px">${booksPanel()}${controlsPanel()}${moneyPanel()}${reminderPanel()}${routePanel()}${devicePanel()}${healthPanel()}</div>`; };
 const loadHealth = () => call("GET", "/api/status").then((h) => { S.health = h; render(); }, () => {});
 /* ---------- barcode scanning: a USB scanner types into the box; a phone uses its camera ---------- */
@@ -517,7 +535,7 @@ document.addEventListener("submit", (e) => {
 
 /* ---------- actions ---------- */
 const actions = (a, id) => ({
-  "go-cash": () => window.LedgerUI.goView("cash"),
+  "go-cash": () => window.LedgerUI.goView("cash"), "ops-go-money": () => goStore("Money rules"), "go-store": () => goStore("System"),
   "ops-close": () => closeDay(id), "ops-remit": remitForm,
   "ops-reopen": () => reasonSheet(`Reopen ${fmtDate(id)}`, "Payments for this day can be changed again until you close it.", "Reason", (reason) => call("POST", "/api/cash/reopen", { date: id, reason })),
   "ops-remit-ok": () => reasonSheet("Approve remittance", "Record what happened with the difference.", "Note", (note) => call("POST", `/api/remittances/${encodeURIComponent(id)}/decide`, { note })),
@@ -546,5 +564,5 @@ const actions = (a, id) => ({
   "ops-rem-run": () => guarded(a, async () => { const r = await call("POST", "/api/reminders/run", {}); toast(`${r.sent} sent, ${r.failed} failed`, r.failed ? "error" : undefined); }),
 })[a.dataset.act];
 
-window.LedgerOps = { views: { cash: vCash, buying: vBuying }, actions, notices, storePanels, passwordPanel, netProfitKpi, deliveryBlock, taxHead, taxPanel };
+window.LedgerOps = { views: { cash: vCash, buying: vBuying }, actions, notices, storePanels, storeSections, passwordPanel, netProfitKpi, deliveryBlock, taxHead, taxPanel };
 })();

@@ -2,7 +2,7 @@
 
 This document defines the target functional requirements for the Dealer Credit Ledger. It covers the existing product plus the modules needed for a complete credit, inventory and collections system.
 
-- **Document version:** 1.6
+- **Document version:** 1.7
 - **Application version:** 1.0 (Node.js 20+, SQLite, vanilla JS)
 - **Last updated:** 4 November 2026
 - **Requirement count:** 88 functional, plus 12 production-readiness items
@@ -23,20 +23,20 @@ This document defines the target functional requirements for the Dealer Credit L
 
 | Module | Range | Total | Implemented | Partial | Planned |
 |---|---|---:|---:|---:|---:|
-| Credit and receivables | FR-001 – FR-012 | 12 | 10 | 0 | 2 |
-| Inventory and procurement | FR-013 – FR-024 | 12 | 10 | 0 | 2 |
-| Orders and fulfillment | FR-025 – FR-034 | 10 | 8 | 0 | 2 |
+| Credit and receivables | FR-001 – FR-012 | 12 | 12 | 0 | 0 |
+| Inventory and procurement | FR-013 – FR-024 | 12 | 12 | 0 | 0 |
+| Orders and fulfillment | FR-025 – FR-034 | 10 | 9 | 0 | 1 |
 | Pricing and catalog | FR-035 – FR-040 | 6 | 4 | 0 | 2 |
 | Returns and adjustments | FR-041 – FR-045 | 5 | 2 | 1 | 2 |
 | Reporting and analytics | FR-046 – FR-053 | 8 | 8 | 0 | 0 |
 | Security, users and audit | FR-054 – FR-061 | 8 | 8 | 0 | 0 |
 | Backup and operations | FR-062 – FR-067 | 6 | 6 | 0 | 0 |
-| Platform and integrations | FR-068 – FR-070 | 3 | 0 | 1 | 2 |
-| Collections and controls | FR-071 – FR-074 | 4 | 3 | 0 | 1 |
+| Platform and integrations | FR-068 – FR-070 | 3 | 1 | 1 | 1 |
+| Collections and controls | FR-071 – FR-074 | 4 | 4 | 0 | 0 |
 | Dealer relationships (CRM) | FR-075 | 1 | 1 | 0 | 0 |
-| Field collections, privacy and growth | FR-076 – FR-082 | 7 | 4 | 1 | 2 |
+| Field collections, privacy and growth | FR-076 – FR-082 | 7 | 5 | 1 | 1 |
 | Catalog media, approvals and field use | FR-083 – FR-088 | 6 | 5 | 0 | 1 |
-| **Total** | | **88** | **69** | **3** | **16** |
+| **Total** | | **88** | **77** | **3** | **8** |
 
 ### P0 items delivered in this release
 
@@ -169,7 +169,7 @@ This document defines the target functional requirements for the Dealer Credit L
 ### FR-010 — Installment and payment plans
 
 - **Priority:** P2
-- **Status:** Planned
+- **Status:** Implemented
 - **User story:** As the owner, I want to split a large receivable into scheduled installments so a dealer can pay over time.
 - **Acceptance criteria:**
   - A charge can be linked to a plan with a number of installments, frequency and start date.
@@ -180,7 +180,7 @@ This document defines the target functional requirements for the Dealer Credit L
 ### FR-011 — Late fees and interest
 
 - **Priority:** P2
-- **Status:** Planned
+- **Status:** Implemented
 - **User story:** As the owner, I want to charge a late fee or interest on overdue balances according to a configurable policy.
 - **Acceptance criteria:**
   - A policy defines the rate, grace period and compounding method.
@@ -318,7 +318,7 @@ This document defines the target functional requirements for the Dealer Credit L
 ### FR-023 — Costing method (weighted average or FIFO)
 
 - **Priority:** P2
-- **Status:** Planned
+- **Status:** Implemented
 - **User story:** As the owner, I want cost of goods sold calculated consistently when purchase costs change.
 - **Acceptance criteria:**
   - The store chooses weighted-average or FIFO costing.
@@ -329,7 +329,7 @@ This document defines the target functional requirements for the Dealer Credit L
 ### FR-024 — Batch, lot and expiry tracking
 
 - **Priority:** P2
-- **Status:** Planned
+- **Status:** Implemented
 - **User story:** As the owner, I want to track batches and expiry dates for products that can expire.
 - **Acceptance criteria:**
   - A product can be marked as batch-tracked.
@@ -435,7 +435,7 @@ This document defines the target functional requirements for the Dealer Credit L
 ### FR-033 — Delivery and logistics tracking
 
 - **Priority:** P2
-- **Status:** Planned
+- **Status:** Implemented
 - **User story:** As the owner, I want to record who delivered an order and when so responsibility is clear.
 - **Acceptance criteria:**
   - A released order can record a driver, vehicle, delivery date and remarks.
@@ -867,13 +867,14 @@ This document defines the target functional requirements for the Dealer Credit L
 ### FR-069 — Tax and BIR-ready documents
 
 - **Priority:** P2
-- **Status:** Planned
+- **Status:** Implemented
 - **User story:** As the owner, I want tax fields and official document numbering so receipts can meet local requirements.
 - **Acceptance criteria:**
   - The store records TIN, VAT registration and business permit details.
   - Products can be marked VAT-exempt or zero-rated.
   - Sales show VATable sales, VAT amount and total.
   - Document series can be registered and are gapless.
+  - **Note:** the app supplies the fields and numbering only. Official status comes from BIR registration and accreditation, so receipts say they are not official until a series is registered.
   - Reports provide a tax summary for filing.
 
 ### FR-070 — Import, barcode and accounting integrations
@@ -931,7 +932,7 @@ This document defines the target functional requirements for the Dealer Credit L
 ### FR-074 — Dealer credit application and limit review
 
 - **Priority:** P2
-- **Status:** Planned
+- **Status:** Implemented
 - **User story:** As the owner, I want new dealers to apply for credit and existing limits to be reviewed on a schedule so credit is extended deliberately.
 - **Acceptance criteria:**
   - A credit application records the requested limit, references and supporting documents.
@@ -1018,7 +1019,7 @@ This document defines the target functional requirements for the Dealer Credit L
 ### FR-080 — Dealer disputes
 
 - **Priority:** P2
-- **Status:** Planned
+- **Status:** Implemented
 - **User story:** As a dealer, I want to flag a charge I believe is wrong so it is reviewed instead of counting against me while it is being checked.
 - **Acceptance criteria:**
   - From the portal, a dealer can dispute a charge with a reason (not received, wrong quantity, wrong price, other), a disputed amount, a note and an optional photo.
@@ -1329,6 +1330,9 @@ These apply to every functional requirement above.
 - **Shared rules:** `lib/credit.js` is served as `/credit.js`, so the server, staff app and portal use one copy of `settle()`, `counts()` and `splitName()`. `counts()` leaves out voided records and post-dated checks until their date.
 - **Daily operations:** `lib/ops.js` holds the rules and routes for cash close, remittance, checks, proof of payment, reminders and purchasing; `public/ops.js` holds their screens. New collections: `cashcloses`, `remittances`, `reminders`, `proofs`, `suppliers`, `purchases`.
 - **Ledger history:** a transaction can only be voided, never deleted (sample records are the exception). `settings.closedThrough` locks transactions on or before that date; it changes only through `/api/periods/close` and `/api/periods/reopen`. A closed cash day locks that day's payments. A check that bounces inside a locked date is reversed by a debit dated today, so closed books are not rewritten.
+- **What is due:** `dueParts()` in `lib/credit.js` turns an open charge into `[{ due, amount }]`, applying its payment plan and leaving out any disputed amount. Overdue, credit hold, aging, reminders and late fees all use it. A disputed amount has its own aging column, so aging still reconciles to the balance.
+- **Finance:** `lib/finance.js` holds plans, late fees, costing, lots, delivery, VAT, credit applications and disputes. `stockMoved()` keeps cost layers and lots in step with every stock change. Stock that comes back goes to a `RETURNED` lot for checking, because a sale doesn't record which lot it took.
+- **Added beyond this list:** merging duplicates, supplier payments, expenses and net profit, stock locations, barcodes, approval of large voids and discounts (`settings.controls`, default ₱1,000 and 10%), offline sales and returns, a portal statement, thermal receipts, forgotten-password help, phone notifications (`lib/push.js`), system health (`/api/status`), and a general API limit. Offline dealer edits are deliberately not supported: phones don't store personal fields (PR-10), so an offline save could erase them.
 - **Reminders:** `REMINDER_WEBHOOK_URL` receives `{ channel, to, message }` as JSON, with `REMINDER_WEBHOOK_TOKEN` as a bearer token. The server runs hourly from 09:00 to 18:00. Each reminder is keyed by dealer, due date and schedule step, so a sent message is never repeated and a failed one is retried.
 - **Duplicate checks:** the forms warn as you type with `findDealerMatches()` and `findProductMatches()` in `public/app.js`. `assertUnique()` in `lib/app.js` enforces exact matches using `dealerKeys()` and `productKeys()` in `lib/credit.js`, and answers 409 `duplicate`. Anonymised dealers are skipped. A full restore and `scripts/import-backup.js` copy records as they are and aren't checked.
 - **Dealer CRM:** dealers carry `stage`, `stageHistory`, contact fields and `tags`; contact entries live in the `interactions` collection (`dealerId`, `kind`, `date`, `outcome`, `note`, `followUp`, `followUpDone`). The server promotes a prospect to `dealer` inside the same transaction as its first sale.
