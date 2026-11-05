@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0d6b5c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Ledger">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/icon-192.png">
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}body{margin:0;font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -15,11 +18,13 @@
 </head>
 <body>
 
+<button class="skip" id="skipMain" type="button">Skip to content</button>
 <header>
   <div class="wrap">
     <div class="top">
       <div class="brand"><h1 id="storeName">Dealer Credit Ledger</h1><small id="sync" class="status">Connecting…</small><small id="acct" class="status"></small></div>
       <button class="btn icon-btn" id="btnSearch" type="button" aria-label="Search (Ctrl+K)" title="Search (Ctrl+K)"><span class="ic"></span><span class="kbd">Ctrl K</span></button>
+      <button class="btn icon-btn" id="btnKeys" type="button" aria-label="Keyboard shortcuts (?)" title="Keyboard shortcuts (?)"><span class="kbd">?</span></button>
       <div class="actions" id="topActions" hidden>
         <button class="btn primary" data-act="new-sale" type="button">+ Credit sale</button>
         <button class="btn" data-act="new-pay" type="button">+ Payment</button>
@@ -40,7 +45,7 @@
     </nav>
   </div>
 </header>
-<main class="wrap" id="main" aria-busy="true">
+<main class="wrap" id="main" tabindex="-1" aria-busy="true">
   <div class="kpis" aria-hidden="true"><div class="kpi skel-card"><i class="skel w40"></i><i class="skel w70 tall"></i><i class="skel w50"></i></div><div class="kpi skel-card"><i class="skel w40"></i><i class="skel w70 tall"></i><i class="skel w50"></i></div><div class="kpi skel-card"><i class="skel w40"></i><i class="skel w70 tall"></i><i class="skel w50"></i></div><div class="kpi skel-card"><i class="skel w40"></i><i class="skel w70 tall"></i><i class="skel w50"></i></div></div>
   <section class="panel" aria-label="Loading your ledger"><i class="skel w30"></i><i class="skel w100"></i><i class="skel w100"></i><i class="skel w80"></i><i class="skel w100"></i><p class="small muted" style="margin:10px 0 0">Loading dealers, products, credit sales and payments…</p></section>
 </main>
@@ -48,6 +53,7 @@
 <button class="fab" id="fab" type="button" aria-label="New sale, payment, return…" hidden></button>
 <div id="sheetRoot"></div>
 
+<script src="/install.js"></script>
 <script src="/shim.js"></script>
 <script src="/credit.js"></script>
 <script src="/app.js"></script>

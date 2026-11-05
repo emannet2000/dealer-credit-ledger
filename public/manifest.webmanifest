@@ -1,4 +1,5 @@
 {
+  "id": "/",
   "name": "Dealer Credit Ledger",
   "short_name": "Ledger",
   "description": "Dealer credit, collections and inventory. Payments can be recorded offline and sync later.",

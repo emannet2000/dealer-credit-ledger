@@ -35,8 +35,8 @@ This document defines the target functional requirements for the Dealer Credit L
 | Collections and controls | FR-071 – FR-074 | 4 | 4 | 0 | 0 |
 | Dealer relationships (CRM) | FR-075 | 1 | 1 | 0 | 0 |
 | Field collections, privacy and growth | FR-076 – FR-082 | 7 | 5 | 1 | 1 |
-| Catalog media, approvals and field use | FR-083 – FR-088 | 6 | 5 | 0 | 1 |
-| **Total** | | **88** | **77** | **3** | **8** |
+| Catalog media, approvals and field use | FR-083 – FR-089 | 7 | 6 | 0 | 1 |
+| **Total** | | **89** | **78** | **3** | **8** |
 
 ### P0 items delivered in this release
 
@@ -210,7 +210,10 @@ This document defines the target functional requirements for the Dealer Credit L
 - **User story:** As store staff, I want to increase or decrease stock with a reason so inventory stays accurate and explainable.
 - **Acceptance criteria:**
   - Stock changes through a dedicated endpoint, never by editing a product's stock field.
-  - Each change stores date, quantity, reason, optional note and the person who made it.
+  - Each change stores date, time, quantity, stock on hand after it, reason, optional note and the person who made it.
+  - The server writes that record in the same step as the stock change, for every source: stock in, damaged or lost, counts, sales, returns, voids and edits, purchases, transfers, starting stock and deleted products. Example records are not recorded.
+  - Nobody can edit or delete the record through the app, and it stays after its product is deleted.
+  - Stock history shows who made each change by username, can be filtered by product, type and date, searched, and exported to CSV.
   - Sales reduce stock; restocked returns increase stock.
   - Adjustments and write-offs do not change stock.
 
@@ -1104,6 +1107,7 @@ This document defines the target functional requirements for the Dealer Credit L
 - **User story:** As a collector working where there is weak or no signal, I want to record payments on my phone and have them sync later so nothing has to be written on paper.
 - **Acceptance criteria:**
   - The app can be installed on a phone and opens without a connection, showing the collector's dealers, balances and last-synced time.
+  - Staff and dealers install the same app; Android offers an install button and iPhone shows the steps. The dealer portal opens offline with a message that it can't reach the store, and signing out clears its saved copy.
   - Payments recorded offline are queued on the device, clearly marked as not yet synced, and sent automatically when the connection returns.
   - Each queued payment has a unique client ID so a retry never records it twice; the server rejects duplicates.
   - If a queued payment conflicts with changes made meanwhile (for example the dealer was archived), it is held for review instead of being lost.
@@ -1134,6 +1138,21 @@ This document defines the target functional requirements for the Dealer Credit L
   - An exact match can never be saved. The server refuses it from every screen and import, and archived records count. Two different people with one name are told apart by adding a middle name. A similar match only shows a hint.
   - A catalog import skips a duplicate row, carries on with the rest and reports what it skipped.
   - Editing a record only checks the fields that changed, so duplicates from before this rule can still be edited.
+
+### FR-089 — Keyboard navigation
+
+- **Priority:** P2
+- **Status:** Implemented
+- **User story:** As a staff member at a desk, I want to work the staff app from the keyboard so I can record and look things up without reaching for the mouse.
+- **Acceptance criteria:**
+  - **?** lists the shortcuts available to that person; recording shortcuts appear only for people who can record.
+  - **G** then a letter opens a screen; **S**, **P**, **R** and **N** start a sale, payment, return or the New menu.
+  - **↓ ↑** and **J K** move between list rows, and **Enter** or **Space** opens the row. Down from a list's search box reaches the first row, and up from the first row returns to the box.
+  - Letter shortcuts never run while typing in a box.
+  - A live update keeps focus on the same row.
+  - An open sheet moves focus inside it and keeps Tab inside it; closing it returns focus to what opened it.
+  - **Skip to content** is the first Tab stop, and left and right arrows move along the screen tabs.
+  - **Note:** this covers the staff app; the dealer portal is unchanged.
 
 ---
 

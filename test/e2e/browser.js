@@ -61,6 +61,14 @@ async function startBrowser() {
     waitFor: async (expr, ms = 10000) => { for (let t = 0; t < ms; t += 100) { if (await ev(`(()=>{ try { return !!(${expr}); } catch(e) { return false; } })()`)) return true; await sleep(100); } throw new Error(`Timed out waiting for: ${expr}`); },
     click: async (sel) => { await b.waitFor(`document.querySelector(${JSON.stringify(sel)})`); await ev(`document.querySelector(${JSON.stringify(sel)}).click()`); },
     fill: async (sel, v) => { await b.waitFor(`document.querySelector(${JSON.stringify(sel)})`); await ev(`(()=>{ const e=document.querySelector(${JSON.stringify(sel)}); e.value=${JSON.stringify(v)}; e.dispatchEvent(new Event("input",{bubbles:true})); e.dispatchEvent(new Event("change",{bubbles:true})); })()`); },
+    // A real key press through Chrome's input pipeline, so focus and Tab behave as they do for a person.
+    press: async (key, { shift } = {}) => {
+      const named = { Enter: 13, Tab: 9, Escape: 27, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40 };
+      const code = named[key] || key.toUpperCase().charCodeAt(0), text = key === "Enter" ? "\r" : named[key] ? undefined : key;
+      const base = { key, windowsVirtualKeyCode: code, modifiers: shift ? 8 : 0 };
+      await cdp("Input.dispatchKeyEvent", { type: text ? "keyDown" : "rawKeyDown", text, ...base });
+      await cdp("Input.dispatchKeyEvent", { type: "keyUp", ...base });
+    },
     text: (sel) => ev(`document.querySelector(${JSON.stringify(sel)})?.innerText || ""`),
     signIn: async (base, cookie) => { await cdp("Network.setCookie", { url: base, name: "sid", value: cookie.split("=")[1] }); await cdp("Page.navigate", { url: base + "/" }); await b.waitFor("/updates live/.test(document.querySelector('#sync')?.textContent||'')", 15000); },
     close: () => { ch.kill(); ws.close(); try { fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch {} },

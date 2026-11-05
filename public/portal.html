@@ -4,7 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0d6b5c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Ledger">
 <title>My Account · Dealer Portal</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <script src="/fonts.js" data-href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Public+Sans:wght@400;500;600;700&display=swap"></script>
 <style>
@@ -133,6 +138,7 @@ input:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,va
 </div>
 <div class="cartbar" id="cartbar" hidden><div class="in"><div><b id="cb-n"></b><div class="small muted num" id="cb-t"></div></div><button class="btn primary" type="button" id="cb-go">Review order</button></div></div>
 <div id="modalRoot"></div>
+<script src="/install.js"></script>
 <script src="/credit.js"></script>
 <script>
 (() => {
@@ -238,7 +244,7 @@ function render(){
         ${p.srp?(S.cart.get(p._id)?`<div class="qty"><button class="btn" type="button" data-q="-1" data-p="${esc(p._id)}" aria-label="One less ${esc(p.name)}">−</button><input class="num" type="number" min="0" inputmode="numeric" id="q-${esc(p._id)}" data-setq="${esc(p._id)}" value="${S.cart.get(p._id)}" aria-label="Quantity of ${esc(p.name)}"><button class="btn" type="button" data-q="1" data-p="${esc(p._id)}" aria-label="One more ${esc(p.name)}">+</button></div>`:`<button class="btn sm add" type="button" data-q="1" data-p="${esc(p._id)}">Add</button>`):""}</div></div>`).join("")}</div>`:`<div class="empty">No products found.</div>`}`; }
   if(S.tab==="orders"){ const list=S.orders.slice().sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
     html+=list.length?`<div class="list">${list.map(o=>`<button class="row" type="button" data-ord="${esc(o._id)}"><div><b>${esc(o.no||"Order")}</b><div class="small muted">Placed ${new Date(o.createdAt).toLocaleDateString("en-PH",{month:"short",day:"numeric"})}${o.pickupDate?` · pickup ${fmtDate(o.pickupDate)}`:""} · ${(o.items||[]).reduce((a,i)=>a+i.qty,0)} pcs</div></div><div class="r"><b class="num">${P(o.amount)}</b><div><span class="pill ${ORD_C[o.status]}">${ORD_L[o.status]}</span></div>${o.delivery?`<div class="small muted">${esc({scheduled:"Delivery scheduled",out:"Out for delivery",delivered:"Delivered",failed:"Delivery failed"}[o.delivery.status])} · ${esc(o.delivery.date)} · ${esc(o.delivery.driver)}${o.delivery.vehicle?" · "+esc(o.delivery.vehicle):""}</div>`:""}</div></button>`).join("")}</div>`:`<div class="empty">No orders yet. Open the Order tab to send your first one.</div>`; }
-  if(S.tab==="account") html+=`<section class="card"><dl class="kv"><dt>Name</dt><dd>${esc(d.name)}</dd>${d.phone?`<dt>Mobile</dt><dd>${esc(d.phone)}</dd>`:""}${d.area?`<dt>Address</dt><dd>${esc(d.area)}</dd>`:""}${d.terms!=null?`<dt>Payment terms</dt><dd>${d.terms} days</dd>`:""}<dt>Username</dt><dd>${esc(S.me.username)}</dd></dl></section>
+  if(S.tab==="account") html+=`<section class="card"><dl class="kv"><dt>Name</dt><dd>${esc(d.name)}</dd>${d.phone?`<dt>Mobile</dt><dd>${esc(d.phone)}</dd>`:""}${d.area?`<dt>Address</dt><dd>${esc(d.area)}</dd>`:""}${d.terms!=null?`<dt>Payment terms</dt><dd>${d.terms} days</dd>`:""}<dt>Username</dt><dd>${esc(S.me.username)}</dd></dl>${PWA.html()}</section>
     <section class="card"><h3 style="font-size:16px;margin-bottom:10px">Change password</h3><form id="pw"><label>Current password<input id="pw1" type="password" autocomplete="current-password" required></label><label>New password<input id="pw2" type="password" autocomplete="new-password" minlength="8" required></label><button class="btn primary" type="submit">Change password</button></form></section>`;
   const act=document.activeElement, fid=act&&act.id, pos=act&&act.selectionStart;
   $("#main").innerHTML=html; $("#main").removeAttribute("aria-busy");
@@ -326,7 +332,7 @@ document.addEventListener("submit",async e=>{ if(e.target.id!=="proofForm") retu
   catch(err){ toast(err.message); b.disabled=false; b.textContent="Send to the store"; } });
 document.addEventListener("submit",async e=>{ if(e.target.id!=="pw") return; e.preventDefault(); const b=e.target.querySelector("button"); b.disabled=true;
   try{ await api("POST","/api/me/password",{current:$("#pw1").value,next:$("#pw2").value}); toast("Password changed"); e.target.reset(); }catch(err){ toast(err.message); } b.disabled=false; });
-$("#logout").addEventListener("click",()=>api("POST","/api/logout").finally(()=>location.href="/login"));
+$("#logout").addEventListener("click",async()=>{ try{ (await navigator.serviceWorker?.getRegistration())?.active?.postMessage("clear"); }catch(e){} api("POST","/api/logout").finally(()=>location.href="/login"); });
 
 let hashOpened=false;
 function openHash(){
@@ -354,7 +360,9 @@ async function load(){
 load();
 window.addEventListener("hashchange",()=>{ hashOpened=false; openHash(); });
 let t; const later=()=>{ clearTimeout(t); t=setTimeout(load,300); };
-if(window.EventSource){ const es=new EventSource("/api/events"); es.addEventListener("change",later); }
+let es=null; const listen=()=>{ if(es||!window.EventSource) return; es=new EventSource("/api/events"); es.addEventListener("change",later); }; listen();
+window.addEventListener("pagehide",()=>{ if(es){ es.close(); es=null; } }); // A cached page mustn't hold a connection open.
+window.addEventListener("pageshow",e=>{ if(e.persisted){ listen(); load(); } });
 document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible") load(); });
 })();
 </script>

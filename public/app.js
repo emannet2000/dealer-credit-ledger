@@ -131,10 +131,8 @@ function reservedQty(exceptOrderId){
 }
 function availableStock(productId,exceptOrderId){ const p=S.products.get(productId); return (Number(p&&p.stock)||0)-(reservedQty(exceptOrderId)[productId]||0); }
 function diffEffect(oldT,newT){ const a=stockEffect(oldT), b=stockEffect(newT), m={}; new Set([...Object.keys(a),...Object.keys(b)]).forEach(k=>{const d=(b[k]||0)-(a[k]||0); if(d) m[k]=d;}); return m; }
-async function applyStock(delta){
-  if(db.adjustStock){ const d=Object.fromEntries(Object.entries(delta).filter(([,v])=>v)); if(Object.keys(d).length) await db.adjustStock(d); return; }
-  for(const [pid,d] of Object.entries(delta)){ const p=S.products.get(pid); if(!p) continue; await db.doc("products/"+pid).update({stock:(Number(p.stock)||0)+d}); }
-}
+// The server writes the stock history entry in the same step as the change.
+async function applyStock(delta,details){ const d=Object.fromEntries(Object.entries(delta).filter(([,v])=>v)); if(Object.keys(d).length) await db.adjustStock(d,details); }
 function statusPill(st,d){
   if(st.balance<0) return `<span class="pill good">Credit ${P(-st.balance)}</span>`;
   if(st.balance===0) return `<span class="pill good">Paid up</span>`;
@@ -361,13 +359,13 @@ function render(){
   { const n=activeOrders().filter(([,o])=>o.status==="new").length; const b=$("#ordBadge"); b.hidden=!n; b.textContent=n; $("#ordersTab").hidden=!window.APP; }
   renderBottomNav();
   if(!db||!Object.values(S.loaded).every(Boolean)) return;
-  const act=document.activeElement, fid=act&&act.closest&&act.closest("#main")&&act.id, pos=act&&act.selectionStart;
+  const act=document.activeElement, fkey=act&&act.closest&&act.closest("#main")?focusKey(act):null, pos=act&&act.selectionStart;
   const mainEl=$("#main"); if(S._lastView!==S.view){ S._lastView=S.view; mainEl.classList.remove("view-in"); void mainEl.offsetWidth; mainEl.classList.add("view-in"); }
   $("#main").innerHTML=({overview:vOverview,orders:vOrders,collect:vCollect,dealers:vDealers,products:vProducts,activity:vActivity,reports:vReports,store:vStore,dash:vDash,...window.LedgerOps.views}[S.view]||vOverview)();
   if(S.view==="dash"&&S.canAdmin){ const D=dashData(); mountBars("dashChart",D.series); }
   if(S.view==="reports") mountTrend();
   if(S.view==="store") window.LedgerOps.storeSections();
-  if(fid){ const el=document.getElementById(fid); if(el){ el.focus(); try{ if(pos!=null) el.setSelectionRange(pos,pos);}catch(e){} } }
+  if(fkey){ const el=refocus(fkey,$("#main")); if(el){ try{ if(pos!=null) el.setSelectionRange(pos,pos);}catch(e){} } }
 }
 function sampleBanner(){
   const any=[S.dealers,S.products,S.txns,S.moves].some(m=>[...m.values()].some(x=>x.sample));
@@ -460,7 +458,7 @@ function vProducts(){
   const value=activeProducts().reduce((a,[,p])=>a+Math.max(0,p.stock)*p.dealerPrice,0);
   return sampleBanner()+`<section class="panel">
     <div class="panel-head"><h2>Products <span class="muted small">(${S.products.size-arch} active · stock worth ${P(value)} at dealer price)</span></h2>
-      <div class="actions">${downloads?`<button class="btn sm" data-act="export-products" type="button">Export CSV</button>`:""}${S.canAdmin?`<button class="btn sm primary" data-act="catalog" type="button">Update catalog</button>`:""}${S.canWrite?`<button class="btn sm" data-act="count" type="button">Stock count</button><button class="btn sm" data-act="stock-in" type="button">+ Stock in</button><button class="btn sm" data-act="new-product" type="button">+ Add product</button>`:""}</div></div>
+      <div class="actions">${downloads?`<button class="btn sm" data-act="export-products" type="button">Export CSV</button>`:""}<button class="btn sm" data-act="stock-history" type="button">Stock history</button>${S.canAdmin?`<button class="btn sm primary" data-act="catalog" type="button">Update catalog</button>`:""}${S.canWrite?`<button class="btn sm" data-act="count" type="button">Stock count</button><button class="btn sm" data-act="stock-in" type="button">+ Stock in</button><button class="btn sm" data-act="new-product" type="button">+ Add product</button>`:""}</div></div>
     ${S.settings.catalogName?`<p class="small muted" style="margin:-4px 0 12px">Current prices: <b>${esc(S.settings.catalogName)}</b>${S.settings.catalogAt?` · updated ${fmtStamp(S.settings.catalogAt)}`:""}</p>`:""}
     <div class="toolbar"><input id="q" type="search" placeholder="Search product, code or category" value="${esc(S.q)}" aria-label="Search products">
       ${cats.length?`<select id="catFilter" aria-label="Category"><option value="">All categories</option>${cats.map(c=>`<option ${c===S.catFilter?"selected":""}>${esc(c)}</option>`).join("")}</select>`:""}
@@ -768,8 +766,8 @@ function countSheet(){
       const ch=$$(".c-in",sh).filter(i=>i.value!==""&&S.products.get(i.dataset.pid)).map(i=>[i.dataset.pid,Math.max(0,Math.round(+i.value))-S.products.get(i.dataset.pid).stock]);
       if(!ch.length){ toast("Enter at least one count"); return; } const diffs=ch.filter(([,d])=>d);
       guarded(btn,async()=>{ const d0=today();
-        for(const [pid,d] of diffs){ await db.collection("moves").doc().set({productId:pid,qty:d,reason:"Stock count",date:d0,note:"Monthly count",createdAt:Date.now(),createdBy:S.me}); await applyStock({[pid]:d}); }
-        if(!diffs.length) await db.collection("moves").doc().set({productId:ch[0][0],qty:0,reason:"Stock count",date:d0,note:`Counted ${ch.length} products, all matched`,createdAt:Date.now(),createdBy:S.me});
+        if(diffs.length) await applyStock(Object.fromEntries(diffs),{reason:"Stock count",date:d0,note:"Monthly count"});
+        else await db.adjustStock({},{reason:"Stock count",date:d0,note:`Counted ${ch.length} products, all matched`,matched:ch[0][0]});
         toast(diffs.length?`Stock corrected for ${diffs.length} product${diffs.length===1?"":"s"}`:"Count saved. Everything matched."); back(); });
     });
   }]);
@@ -1113,19 +1111,19 @@ function catalogSheet(){
 const lineDisc=(i,t)=>i.qty*i.price*(i.pct!=null?i.pct:(t&&t.discountPct)||0)/100;
 const discLabel=t=>t.discountPct!=null?`Less ${t.discountPct}% dealer discount`:"Less dealer discount";
 /* ================= sheet stack ================= */
-const stack=[];
-function show(fn,live){ stack.push({fn,live:!!live}); paintSheet(); }
+const stack=[]; let opener=null;
+function show(fn,live){ if(!stack.length){ const a=document.activeElement; if(!(a&&a.closest&&a.closest("#sheetRoot"))) opener=a&&a!==document.body?{el:a,key:focusKey(a)}:null; } stack.push({fn,live:!!live}); paintSheet(); }
 function back(){ stack.pop(); paintSheet(); }
 function closeAll(){ stack.length=0; paintSheet(); }
 const REDUCE=window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 function paintSheet(refresh){
   const root=$("#sheetRoot"); const top=stack[stack.length-1]; let ov=$("#ov",root);
-  if(!top){ if(ov&&!ov.classList.contains("closing")){ ov.classList.add("closing"); document.body.classList.remove("sheet-open"); setTimeout(()=>{ if(!stack.length) root.innerHTML=""; },REDUCE?0:180); } return; }
+  if(!top){ if(ov&&!ov.classList.contains("closing")){ ov.classList.add("closing"); document.body.classList.remove("sheet-open"); setTimeout(()=>{ if(!stack.length) root.innerHTML=""; },REDUCE?0:180); if(opener){ const o=opener; opener=null; if(o.el.isConnected) o.el.focus({preventScroll:true}); else refocus(o.key); } } return; }
   if(refresh&&!top.live) return;
-  const prev=ov&&$(".sheet",ov); const sc=refresh&&prev?prev.scrollTop:0;
+  const prev=ov&&$(".sheet",ov); const sc=refresh&&prev?prev.scrollTop:0, fkey=refresh&&prev&&prev.contains(document.activeElement)?focusKey(document.activeElement):null;
   const [html,mount]=top.fn();
   if(!ov||ov.classList.contains("closing")){
-    root.innerHTML=`<div class="overlay" id="ov"><div class="sheet" role="dialog" aria-modal="true"><div class="sheet-in">${html}</div></div></div>`;
+    root.innerHTML=`<div class="overlay" id="ov"><div class="sheet" role="dialog" aria-modal="true" tabindex="-1"><div class="sheet-in">${html}</div></div></div>`;
     ov=$("#ov",root); ov.addEventListener("mousedown",e=>{ if(e.target.id==="ov") closeAll(); });
     document.body.classList.add("sheet-open");
   } else $(".sheet",ov).innerHTML=`<div class="sheet-in${refresh?"":" swap"}">${html}</div>`;
@@ -1135,6 +1133,9 @@ function paintSheet(refresh){
   sh.scrollTop=refresh?sc:0;
   if(!refresh){ const f=$("input:not([type=file]):not([type=checkbox]),select,textarea",sh); if(f&&!top.search&&window.matchMedia("(pointer:fine)").matches) f.focus({preventScroll:true}); }
   mount&&mount(sh);
+  sh.setAttribute("aria-label",($("h2",sh)||{}).textContent||"Search");
+  if(fkey) refocus(fkey,sh);
+  if(!sh.contains(document.activeElement)) sh.focus({preventScroll:true});
 }
 document.addEventListener("keydown",e=>{ if(e.key==="Escape"&&stack.length) back(); });
 const head=(t,sub)=>`<div class="sheet-head"><div style="min-width:0">${stack.length>1?`<button class="btn sm" data-back type="button" style="margin-bottom:8px">← Back</button>`:""}<h2>${t}</h2>${sub?`<div class="muted small">${sub}</div>`:""}</div><button class="btn sm" data-close type="button" aria-label="Close">Close</button></div>`;
@@ -1682,7 +1683,7 @@ function productForm(id){
     ${id?`<button class="btn" type="button" data-act="stock-for" data-id="${id}">Stock in / adjust</button>${S.canAdmin?`<button class="btn" type="button" data-act="ops-merge" data-kind="products" data-id="${id}">Merge a duplicate</button>`:""}${qrReady()?`<button class="btn" type="button" data-act="product-qr" data-id="${id}">QR label</button>`:""}`:""}
     ${id?(used?`<button class="btn" type="button" id="p-arch" style="margin-left:auto">${p.active===false?"Restore product":"Archive product"}</button>`:`<button class="btn danger" type="button" id="p-del" style="margin-left:auto">Delete product</button>`):""}</div></form>
     ${(p.priceHistory||[]).length?`<section class="panel" style="margin-top:16px"><h2>Price history</h2><table><tbody>${p.priceHistory.slice().reverse().map(h=>`<tr><td class="small nowrap">${fmtStamp(h.at)}</td><td class="small">${esc(h.catalog||"")}</td><td class="r num small">${h.from!=null?P(h.from):"—"} → <b>${P(h.to)}</b></td></tr>`).join("")}</tbody></table></section>`:""}
-    ${mv.length?`<section class="panel" style="margin-top:16px"><h2>Recent stock changes</h2><table><tbody>${mv.map(m=>`<tr><td class="small nowrap">${fmtDate(m.date)}</td><td class="small">${esc(m.reason)}${m.note?" · "+esc(m.note):""}</td><td class="r num">${m.qty>0?"+":""}${m.qty}</td></tr>`).join("")}</tbody></table></section>`:""}`,sh=>{
+    ${mv.length?`<section class="panel" style="margin-top:16px"><div class="panel-head"><h2>Recent stock changes</h2><button class="btn sm" data-act="stock-history" data-id="${id}" type="button">Full history</button></div><table><tbody>${mv.map(m=>`<tr><td class="small nowrap">${moveWhen(m)}</td><td class="small">${moveDetail(m)}<div class="muted">${esc(moveWho(m))}</div></td><td class="r num">${moveQty(m)}</td></tr>`).join("")}</tbody></table></section>`:""}`,sh=>{
     // Look for this product as the form is filled in. An edit only checks what changed.
     const fresh=(v,old)=>id&&normText(v)===normText(old)?"":v;
     const productDups=()=>findProductMatches(S.products,{name:fresh($("#p-name",sh).value,p.name),code:fresh($("#p-code",sh).value,p.code),barcode:fresh($("#p-barcode",sh).value,p.barcode)},id);
@@ -1732,11 +1733,10 @@ function productForm(id){
         else if(fetched) data.imageId=fetched.id;
         else if(removeImg) data.imageId=null;
         const ref=db.collection("products").doc(id||undefined); await ref.set(data); fetched=null;
-        if(!id&&data.stock>0) await db.collection("moves").doc().set({productId:ref.id,qty:data.stock,reason:"Starting stock",date:today(),note:"",createdAt:Date.now(),createdBy:S.me});
         if(oldImg&&assets&&data.imageId!==oldImg) assets.delete(oldImg).catch(()=>{});
         toast(id?"Product updated":"Product added"); back(); });
     });
-    const del=$("#p-del",sh); if(del) del.addEventListener("click",()=>{ if(armed(del,"Tap again to delete")) guarded(del,async()=>{ const im=S.products.get(id).imageId; await db.doc("products/"+id).delete(); for(const [mid,m] of [...S.moves]) if(m.productId===id) await db.doc("moves/"+mid).delete(); if(im&&assets) assets.delete(im).catch(()=>{}); toast("Product deleted"); closeAll(); }); });
+    const del=$("#p-del",sh); if(del) del.addEventListener("click",()=>{ if(armed(del,"Tap again to delete")) guarded(del,async()=>{ const im=S.products.get(id).imageId; await db.doc("products/"+id).delete(); if(im&&assets) assets.delete(im).catch(()=>{}); toast("Product deleted"); closeAll(); }); });
     const ar=$("#p-arch",sh); if(ar) ar.addEventListener("click",()=>guarded(ar,async()=>{ const on=S.products.get(id).active===false; await db.doc("products/"+id).update({active:on,updated:stamp()}); toast(on?"Product restored":"Product archived. It won't appear when recording sales."); back(); }));
   }]; });
 }
@@ -1757,9 +1757,46 @@ function stockForm(pid){
     $("#f",sh).addEventListener("submit",e=>{ e.preventDefault(); const btn=e.submitter||$("button[type=submit]",sh);
       const id=$("#m-p").value, p=S.products.get(id), q=Math.round(Number($("#m-q").value)||0); if(!p) return;
       const delta=kind==="in"?q:kind==="out"?-q:q-p.stock; if(!delta){ toast("No change to save"); return; }
-      guarded(btn,async()=>{ await db.collection("moves").doc().set({productId:id,qty:delta,reason:kind==="in"?"Received stock":kind==="out"?"Damaged / lost":"Stock count",date:$("#m-date").value,note:$("#m-note").value.trim(),createdAt:Date.now(),createdBy:S.me});
-        await applyStock({[id]:delta}); toast("Stock updated"); back(); });
+      guarded(btn,async()=>{ await applyStock({[id]:delta},{reason:kind==="in"?"Received stock":kind==="out"?"Damaged / lost":"Stock count",date:$("#m-date").value,note:$("#m-note").value.trim()});
+        toast("Stock updated"); back(); });
     });
+  }]);
+}
+
+/* ---------- stock history (FR-013) ---------- */
+const MOVE_KIND={in:["Stock in","good"],out:["Stock out","bad"],transfer:["Transfer","neutral"],none:["No change","neutral"]};
+const moveKind=m=>m.transfer?"transfer":m.qty>0?"in":m.qty<0?"out":"none";
+const moveProduct=m=>(S.products.get(m.productId)||{}).name||m.productName||"(removed product)";
+// The sign-in username, because two people can share a display name.
+const moveWho=m=>((S.team||[]).find(u=>u.id===m.createdBy)||{}).username||m.byName||nameOf(m.createdBy);
+const moveQty=m=>m.qty>0?`+${m.qty}`:m.qty<0?`−${-m.qty}`:"0";
+const movePlace=m=>m.locationId?(S.locations.get(m.locationId)||{}).name||"":"";
+const moveText=m=>[m.reason,m.note,movePlace(m)].filter(Boolean).join(" · ");
+const moveDetail=m=>esc(moveText(m));
+// When it was recorded, plus the date it was entered for if that was another day.
+const moveWhen=m=>{ const at=m.createdAt>1e9?m.createdAt:0; if(!at) return fmtDate(m.date); return esc(fmtStamp(at))+(m.date&&m.date!==ymd(new Date(at))?`<div class="muted">Dated ${fmtDate(m.date)}</div>`:""); };
+function stockHistory(pid){
+  const F={pid:pid||"",kind:"",from:"",to:"",q:"",limit:200};
+  const rows=()=>{ const q=F.q.trim().toLowerCase();
+    return [...S.moves.values()].filter(m=>(!F.pid||m.productId===F.pid)&&(!F.kind||moveKind(m)===F.kind)&&(!F.from||m.date>=F.from)&&(!F.to||m.date<=F.to)&&(!q||[moveProduct(m),moveText(m),moveWho(m)].join(" ").toLowerCase().includes(q)))
+      .sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)); };
+  const list=R=>{ const sum=k=>Math.abs(R.reduce((a,m)=>a+(moveKind(m)===k?m.qty:0),0));
+    return !R.length?`<div class="empty"><h3>Nothing to show</h3><p>${S.moves.size?"Try other filters.":"Stock coming in and going out will be listed here."}</p></div>`
+    :`<p class="small muted">${R.length.toLocaleString()} record${R.length===1?"":"s"} · <b>${sum("in").toLocaleString()}</b> in · <b>${sum("out").toLocaleString()}</b> out</p>
+    <div class="tbl-wrap"><table><thead><tr><th>When</th><th>Product</th><th>Type</th><th class="r">Qty</th><th class="r">On hand</th><th>Details</th><th>By</th></tr></thead><tbody>
+    ${R.slice(0,F.limit).map(m=>{ const [l,c]=MOVE_KIND[moveKind(m)]; return `<tr><td class="small nowrap">${moveWhen(m)}</td><td><b>${esc(moveProduct(m))}</b></td><td><span class="pill ${c}">${l}</span></td><td class="r num">${moveQty(m)}</td><td class="r num">${m.after??"—"}</td><td class="small">${moveDetail(m)}</td><td class="small">${esc(moveWho(m))}</td></tr>`; }).join("")}
+    </tbody></table></div>${R.length>F.limit?`<p class="small muted">Showing the latest ${F.limit} of ${R.length}. <button class="btn sm" id="h-more" type="button">Show more</button></p>`:""}`; };
+  show(()=>[head("Stock history","Every stock in and stock out: when, how many and who")+`<div class="toolbar">
+    <input id="h-q" type="search" placeholder="Search product, reason, DR no., person" aria-label="Search stock history">
+    <select id="h-p" aria-label="Product"><option value="">All products</option>${[...S.products.entries()].sort((a,b)=>a[1].name.localeCompare(b[1].name)).map(([id,p])=>`<option value="${id}" ${id===F.pid?"selected":""}>${esc(p.name)}</option>`).join("")}</select>
+    <select id="h-k" aria-label="Type"><option value="">Stock in and out</option><option value="in">Stock in</option><option value="out">Stock out</option><option value="transfer">Transfers</option></select>
+    <input id="h-from" type="date" aria-label="From date"><span class="muted">to</span><input id="h-to" type="date" aria-label="To date"></div>
+    <div id="h-list"></div><div class="actions" style="margin-top:12px">${downloads?`<button class="btn" id="h-csv" type="button">Export CSV</button>`:""}<button class="btn" type="button" data-back>Close</button></div>`,sh=>{
+    const box=$("#h-list",sh), paint=()=>{ box.innerHTML=list(rows()); };
+    for(const [sel,key] of [["#h-q","q"],["#h-p","pid"],["#h-k","kind"],["#h-from","from"],["#h-to","to"]]) $(sel,sh).addEventListener(sel==="#h-q"?"input":"change",e=>{ F[key]=e.target.value; F.limit=200; paint(); });
+    box.addEventListener("click",e=>{ if(e.target.id==="h-more"){ F.limit+=500; paint(); } });
+    const out=$("#h-csv",sh); if(out) out.addEventListener("click",()=>save(`stock-history-${today()}.csv`,csv([["Recorded","Stock date","Product","Type","Quantity","On hand after","Reason","Note","Location","By"],...rows().map(m=>[m.createdAt>1e9?fmtStamp(m.createdAt):"",m.date,moveProduct(m),MOVE_KIND[moveKind(m)][0],m.qty,m.after??"",m.reason,m.note||"",movePlace(m),moveWho(m)])])));
+    paint();
   }]);
 }
 
@@ -1868,7 +1905,7 @@ function itemsForm(kind,dealerId,editId,opts){
       const ow=$("#s-ovr-wrap"); if(ow) ow.hidden=!(S._hard&&S.canAdmin);
       return T; };
     const setDue=()=>{ if(!isSale||old) return; const d=S.dealers.get($("#s-dealer").value); $("#s-due").value=addDays($("#s-date").value||today(),d?d.terms??30:(S.settings.defaultTerms??30)); };
-    $("#pick-list").addEventListener("click",e=>{ const b=e.target.closest("[data-pid]"); if(b) addProduct(b.dataset.pid); });
+    $("#pick-list").addEventListener("click",e=>{ const b=e.target.closest("[data-pid]"); if(!b) return; const k=focusKey(b); addProduct(b.dataset.pid); refocus(k,$("#pick-list")); });
     $("#pick-q").addEventListener("input",drawPick);
     $("#pick-q").addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); const v=$("#pick-q").value.trim(), exact=v&&prods().find(([,p])=>p.barcode===v||p.code===v), b=exact?{dataset:{pid:exact[0]}}:$("#pick-list [data-pid]"); if(b){ addProduct(b.dataset.pid); $("#pick-q").value=""; drawPick(); } } });
     $("#cart").addEventListener("click",e=>{ const row=e.target.closest(".cart-row"); if(!row) return; const i=cart[row.dataset.k];
@@ -2244,7 +2281,7 @@ document.addEventListener("click",e=>{
        "sale-for":()=>itemsForm("sale",id), "pay-for":()=>paymentForm(id), "ret-for":()=>itemsForm("return",id),
        "adjust-for":()=>adjustmentForm(id), "writeoff-for":()=>writeoffForm(id),
        "new-dealer":()=>dealerForm(), "new-prospect":()=>dealerForm(null,"lead"), "log-contact":()=>contactForm(id), "edit-contact":()=>contactForm(null,id), "fu-done":()=>markFollowUpDone(id,a), "edit-dealer":()=>dealerForm(id), "new-product":()=>productForm(),
-       "stock-in":()=>stockForm(), "stock-for":()=>stockForm(id), "clear-samples":()=>{ if(armed(a,"Tap again to remove")) clearSamples(a); },
+       "stock-in":()=>stockForm(), "stock-for":()=>stockForm(id), "stock-history":()=>stockHistory(id), "clear-samples":()=>{ if(armed(a,"Tap again to remove")) clearSamples(a); },
        "backup":async()=>{ if(await save(`ledger-backup-${today()}.json`,backupJson())){ lsSet("lastBackup",Date.now()); render(); } },
        "receipt":()=>receiptSheet(id), "aging":()=>agingSheet(), "aging-for":()=>agingSheet(id), "statement":()=>statementSheet(id),
        "dealer-qr":()=>dealerQr(id), "product-qr":()=>productQr(id),
@@ -2271,13 +2308,74 @@ document.addEventListener("click",e=>{
   const dl=e.target.closest("[data-dealer]"); if(dl){ e.preventDefault(); dealerSheet(dl.dataset.dealer); return; }
   const pr=e.target.closest("[data-product]"); if(pr){ productForm(pr.dataset.product); }
 });
-document.addEventListener("keydown",e=>{ if(e.key==="Enter"&&e.target.matches("tr[tabindex]")) e.target.click();
-  const typing=e.target.closest&&e.target.closest("input,textarea,select,[contenteditable]");
-  if(((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k")||(e.key==="/"&&!typing)){ e.preventDefault(); searchSheet(); } });
+/* ================= keyboard ================= */
+const GO_KEYS={v:"overview",a:"dash",o:"orders",c:"collect",h:"cash",d:"dealers",p:"products",b:"buying",t:"activity",r:"reports",s:"store"};
+const FOCUSABLE='a[href],button:not([disabled]),input:not([disabled]):not([type=hidden]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])';
+// A selector that finds "the same" element again after the screen is redrawn.
+function focusKey(el){
+  if(!el||!el.tagName||el===document.body||el.classList.contains("sheet")) return null;
+  if(el.id) return "#"+CSS.escape(el.id);
+  const a=[...el.attributes].filter(x=>x.name.startsWith("data-"));
+  return a.length?el.tagName.toLowerCase()+a.map(x=>`[${x.name}="${CSS.escape(x.value)}"]`).join(""):null;
+}
+function refocus(key,root){ const el=key&&(root||document).querySelector(key); if(el) el.focus({preventScroll:true}); return el; }
+const visibleTab=v=>{ const t=$(`.tab[data-view="${v}"]`); return t&&!t.hidden?t:null; };
+const dataReady=()=>!!db&&Object.values(S.loaded).every(Boolean);
+function moveRow(dir,from){
+  const scope=stack.length?$("#ov .sheet"):$("#main"); if(!scope) return;
+  const rows=[...$$("tr[tabindex]",scope)].filter(r=>r.getClientRects().length), i=rows.indexOf(from);
+  if(i===0&&dir<0){ const q=$("#q,#pick-q",scope); if(q) q.focus(); return; }
+  const next=i<0?rows[dir>0?0:rows.length-1]:rows[i+dir]; if(!next) return;
+  next.focus({preventScroll:true}); next.scrollIntoView({block:"nearest"});
+}
+function trapTab(e){
+  const sh=$("#ov .sheet"), a=document.activeElement; if(!sh||(a!==document.body&&!a.closest("#sheetRoot"))) return;
+  const f=[...$$(FOCUSABLE,sh)].filter(x=>x.getClientRects().length), first=f[0], last=f[f.length-1];
+  if(!f.length){ e.preventDefault(); sh.focus(); }
+  else if(!sh.contains(a)||(a===sh&&e.shiftKey)){ e.preventDefault(); (e.shiftKey?last:first).focus(); }
+  else if(!e.shiftKey&&a===last){ e.preventDefault(); first.focus(); }
+  else if(e.shiftKey&&a===first){ e.preventDefault(); last.focus(); }
+}
+function keysSheet(){
+  if(stack.length&&stack[stack.length-1].keys) return;
+  const K=(...ks)=>ks.map(k=>`<kbd class="kbd">${k}</kbd>`).join(" ");
+  const group=(t,rows)=>`<h3>${t}</h3><dl class="keys-list">${rows.map(([k,l])=>`<div><dt>${k}</dt><dd>${l}</dd></div>`).join("")}</dl>`;
+  const screens=Object.entries(GO_KEYS).filter(([,v])=>visibleTab(v)).map(([k,v])=>[K("G",k.toUpperCase()),VIEW_L[v]]);
+  show(()=>[head("Keyboard shortcuts","Letter shortcuts don't run while you're typing in a box.")+
+    group("Anywhere",[[K("Ctrl","K")+" or "+K("/"),"Search everything"],[K("?"),"Show this list"],[K("Esc"),"Close or go back"],[K("Tab"),"Next button or box"]])+
+    (S.canWrite?group("Record",[[K("S"),"Credit sale"],[K("P"),"Payment"],[K("R"),"Return"],[K("N"),"All new items"]]):"")+
+    group("Lists",[[K("↓")+" "+K("↑")+" or "+K("J")+" "+K("K"),"Move between rows"],[K("Enter")+" or "+K("Space"),"Open the row"]])+
+    group("Go to a screen",screens)]);
+  stack[stack.length-1].keys=true;
+}
+let goAt=0;
+document.addEventListener("keydown",e=>{
+  const t=e.target, k=e.key, l=k.length===1?k.toLowerCase():k, row=t.matches&&t.matches("tr[tabindex]"), typing=t.closest&&t.closest("input,textarea,select,[contenteditable]");
+  if(k==="Tab"){ if(stack.length) trapTab(e); return; }
+  if((e.ctrlKey||e.metaKey)&&l==="k"){ e.preventDefault(); searchSheet(); return; }
+  if(e.ctrlKey||e.metaKey||e.altKey) return;
+  if(row&&(k==="Enter"||k===" ")){ e.preventDefault(); t.click(); return; }
+  if((k==="ArrowDown"||k==="ArrowUp")&&(row||(t.matches&&t.matches("#q,#pick-q")))){ e.preventDefault(); moveRow(k==="ArrowDown"?1:-1,row?t:null); return; }
+  if((k==="ArrowLeft"||k==="ArrowRight")&&t.closest&&t.closest(".tabs")){ e.preventDefault(); const tabs=[...$$(".tab")].filter(x=>!x.hidden), i=tabs.indexOf(t.closest(".tab")); tabs[(i+(k==="ArrowRight"?1:-1)+tabs.length)%tabs.length].focus(); return; }
+  if(typing) return;
+  if(k==="/"){ e.preventDefault(); searchSheet(); return; }
+  if(k==="?"){ e.preventDefault(); keysSheet(); return; }
+  if(e.shiftKey) return;
+  if(l==="j"||l==="k"){ e.preventDefault(); moveRow(l==="j"?1:-1,row?t:null); return; }
+  if(stack.length) return;
+  const chord=Date.now()-goAt<1500; goAt=0;
+  if(chord){ const tab=GO_KEYS[l]&&visibleTab(GO_KEYS[l]); if(tab){ e.preventDefault(); tab.click(); } return; }
+  if(l==="g"){ goAt=Date.now(); return; }
+  const act=S.canWrite&&dataReady()&&{s:()=>itemsForm("sale"),p:()=>paymentForm(),r:()=>itemsForm("return"),n:actionSheet}[l];
+  if(act){ e.preventDefault(); act(); }
+});
+document.addEventListener("focusin",e=>{ if(stack.length&&e.target.closest("header,#main,#bnav,#fab")){ const sh=$("#ov .sheet"); if(sh) sh.focus({preventScroll:true}); } });
 document.addEventListener("click",e=>{
   const n=e.target.closest("[data-nav]"); if(n){ if(n.dataset.nav==="more") moreSheet(); else goView(n.dataset.nav); return; }
   if(e.target.closest("#fab")){ actionSheet(); return; }
   if(e.target.closest("#btnSearch")){ searchSheet(); return; }
+  if(e.target.closest("#btnKeys")){ keysSheet(); return; }
+  if(e.target.closest("#skipMain")){ $("#main").focus(); window.scrollTo(0,0); return; }
 });
 let scr=false; window.addEventListener("scroll",()=>{ const v=window.scrollY>4; if(v!==scr){ scr=v; document.body.classList.toggle("scrolled",v); } },{passive:true});
 let qTimer; document.addEventListener("input",e=>{ if(e.target.id==="q"){ S.q=e.target.value; clearTimeout(qTimer); qTimer=setTimeout(render,120); } });

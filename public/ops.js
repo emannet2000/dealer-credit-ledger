@@ -451,7 +451,7 @@ function healthPanel() {
 const pushable = () => window.isSecureContext && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 function devicePanel() {
   const paper = lsGet("paper") || "", on = pushable() && Notification.permission === "granted" && lsGet("push") === "1";
-  return panel("This device", `<div class="form-grid"><label class="f">Receipt printer<select id="dv-paper">${[["", "Normal paper (A4)"], ["80", "Thermal, 80 mm"], ["58", "Thermal, 58 mm"]].map(([v, l]) => `<option value="${v}" ${paper === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
+  return panel("This device", `<div class="form-grid"><label class="f">Receipt printer<select id="dv-paper">${[["", "Normal paper (A4)"], ["80", "Thermal, 80 mm"], ["58", "Thermal, 58 mm"]].map(([v, l]) => `<option value="${v}" ${paper === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>${PWA.html()}
     ${S.canWrite ? (pushable() ? `<div class="actions" style="margin-top:10px"><button class="btn sm ${on ? "" : "primary"}" data-act="${on ? "ops-push-off" : "ops-push-on"}" type="button">${on ? "Turn off notifications" : "Turn on notifications"}</button></div><p class="small muted" style="margin-bottom:0">For new orders, approvals and payment proofs, even with the app closed. On iPhone, add the app to the Home Screen first.</p>` : `<p class="small muted" style="margin-bottom:0">Notifications need the site on HTTPS in a supported browser.</p>`) : ""}`);
 }
 function applyPaper(v) {

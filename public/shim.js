@@ -168,6 +168,10 @@
     let first = true;
     es.addEventListener("open", () => { setOnline(true); flush(); if (!first) cols.forEach((s, c) => s.listeners.size && refresh(c)); first = false; });
   }
+  // A page left open in the back/forward cache would hold its connection, and browsers
+  // allow only six per site over HTTP/1.1, so the next pages would hang.
+  window.addEventListener("pagehide", () => { if (es) { es.close(); es = null; } });
+  window.addEventListener("pageshow", (e) => { if (e.persisted) connectEvents(); });
   // Safety net when live updates are blocked by a proxy (skipped while they work).
   setInterval(() => { if (document.visibilityState === "visible" && !(es && es.readyState === 1)) cols.forEach((s, c) => s.listeners.size && refresh(c)); }, 60000);
 
@@ -225,7 +229,7 @@
   const db = Object.freeze({
     collection: colRef,
     doc: (p) => { const [c, id] = split(p); return docRef(c, id); },
-    async adjustStock(deltas) { await api("POST", "/api/stock", { deltas }); await refresh("products"); },
+    async adjustStock(deltas, details) { await api("POST", "/api/stock", { deltas, ...details }); await refresh("products"); await refresh("moves"); },
   });
 
   /* ---------- people ---------- */
@@ -329,5 +333,4 @@
       location.href = "/login";
     },
   });
-  if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/sw.js").catch(() => {});
 })();

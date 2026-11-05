@@ -27,6 +27,7 @@ It runs on Node.js with a built-in SQLite database. There's no separate database
 - **Receipts:** a delivery receipt (DR), an acknowledgement receipt for payments, a return slip, an adjustment note and a write-off note, with signature lines and the balance after each transaction. Print them or copy them as text. One opens automatically after each sale or payment.
 - **12-month chart** of credit sales vs. collections in Reports.
 - **Inventory:** stock in, damaged or lost stock, monthly stock count, low-stock alerts, product photos.
+- **Stock history:** every stock in and stock out, with the date, time, quantity, balance after and who did it. Sales, returns, voids, purchases, transfers and counts are all recorded automatically and can't be edited. Filter by product, type or date, or export to CSV from **Products → Stock history**.
 - **Reports** by period, product, dealer and payment method, with cost, gross profit, adjustments, write-offs and CSV export.
 - **Team accounts** with roles. The server enforces what each role can do:
 
@@ -41,6 +42,7 @@ It runs on Node.js with a built-in SQLite database. There's no separate database
 - **Activity log** of every sign-in and change, showing who made it and when.
 - **Backups:** an automatic daily copy of the database, an optional offsite copy after each backup, plus a downloadable backup file, a full backup with accounts and photos, and restore from the Store tab.
 - **Live updates:** changes appear on everyone's screen within a second.
+- **Keyboard shortcuts:** press **?** for the full list. **G** then a letter changes screen, **S**, **P** and **R** start a sale, payment or return, and **↓ ↑** or **J K** move through rows, with **Enter** to open. Open sheets keep Tab inside them and put you back where you were when they close.
 - **Phone-friendly:** a bottom navigation bar, a big **+** button for new sale, payment, return, stock in, dealer or product, and quick search (**Ctrl+K** or **/**) across dealers, products, DR/OR numbers and orders.
 
 ## Requirements
@@ -102,6 +104,8 @@ npx pm2 start server.js --name ledger && npx pm2 save
 ```
 
 Put Caddy or Nginx in front for HTTPS (Caddy gets a free certificate automatically), then set `COOKIE_SECURE=true`. HTTPS is also required for installing the app on phones and recording payments offline.
+
+**Installing on a phone:** staff use **Store → This device**, and dealers use **Account** in the portal. Android shows an **Install app** button. On iPhone, tap Share, then Add to Home Screen. Everyone installs the same app from the same address, and signing in decides whether it opens the ledger or the portal.
 
 **Option B: Docker** (works on Railway, Render, Fly.io or your own server)
 
@@ -191,7 +195,7 @@ Lists show the most important 100 rows first, with a button to show more.
 | `npm run test:edge` | Hostile, broken and extreme input |
 | `npm run test:functional` | Every feature through the real API |
 | `npm run test:coverage` | All of the above, with a coverage table |
-| `npm run test:e2e` (set `CHROME_PATH` if Chrome isn't found) | Browser tests in headless Chrome: credit sale, payment, offline payment, approval request (skipped without `CHROME_PATH`) |
+| `npm run test:e2e` (set `CHROME_PATH` if Chrome isn't found) | Browser tests in headless Chrome: credit sale, payment, offline payment, approval request, keyboard navigation (skipped without `CHROME_PATH`) |
 | `npm run test:all` | Both |
 
 GitHub Actions (`.github/workflows/ci.yml`) runs the dependency audit, `npm test` and the browser tests on Node 20 and 22 for every push and pull request. To make failures block merging, turn on branch protection for `main` in the repository settings and require the **CI** checks.
@@ -234,7 +238,7 @@ The tests cover sign-in, roles and permissions, DR/OR numbering, atomic stock ch
 
 ```
 server.js            starts the web server and daily backups
-REQUIREMENTS.md      the 88 functional requirements and acceptance criteria
+REQUIREMENTS.md      the 89 functional requirements and acceptance criteria
 lib/app.js           API, sign-in, roles and business rules
 lib/credit.js        balance and overdue rules, shared by the server, staff app and portal
 lib/db.js            SQLite database and migrations

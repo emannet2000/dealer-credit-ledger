@@ -519,6 +519,7 @@ test("payments recorded offline sync once, and conflicts are held for review", a
   // The installable app shell is served.
   assert.equal((await anon("GET", "/manifest.webmanifest")).data.start_url, "/");
   assert.match(String((await anon("GET", "/sw.js")).data), /dcl-shell/);
+  assert.equal((await anon("GET", "/install.js")).status, 200);
 });
 
 test("a payment can be applied to the deliveries the dealer chose", async () => {

@@ -297,3 +297,76 @@ test("a full backup keeps collectors and receipt owners", async () => {
   assert.ok(b.data.assets.some((a) => a.dealer_id === "d1"));
   assert.ok(Object.keys(b.data.collections.purchases).length);
 });
+
+test("every stock change leaves a trail of who, when and how many (FR-013)", async () => {
+  const before = Date.now();
+  const trail = async (id) => (await owner("GET", "/api/c/moves")).data.filter((m) => m.data.productId === id).map((m) => m.data).sort((a, b) => a.createdAt - b.createdAt);
+  const last = async (id) => (await trail(id)).at(-1);
+
+  await staff("PUT", "/api/c/products/t1", { data: { name: "Trail Soap", dealerPrice: 75, srp: 100, stock: 10 } });
+  assert.deepEqual([(await last("t1")).reason, (await last("t1")).qty, (await last("t1")).after], ["Starting stock", 10, 10]);
+
+  // Stock in: who, date and time come from the server.
+  await staff("POST", "/api/stock", { deltas: { t1: 5 }, reason: "Received stock", date: day(-2), note: "DR 88", createdBy: "someone-else" });
+  const inn = await last("t1");
+  assert.equal(inn.reason, "Received stock");
+  assert.equal(inn.date, day(-2));
+  assert.equal(inn.note, "DR 88");
+  assert.equal(inn.after, 15);
+  assert.equal(inn.byName, "Sam");
+  // Stock history shows usernames, so everyone on the team can look them up.
+  const seen = (await viewer("GET", "/api/users")).data;
+  assert.ok(seen.find((u) => u.id === inn.createdBy).username);
+  assert.ok(seen.filter((u) => u.role === "dealer").every((u) => !("username" in u)), "dealer sign-ins stay hidden from non-admins");
+  assert.ok(inn.createdAt >= before && inn.createdAt <= Date.now());
+  assert.notEqual(inn.createdBy, "someone-else");
+
+  // Stock out.
+  await staff("POST", "/api/stock", { deltas: { t1: -1 }, reason: "Damaged / lost" });
+  assert.deepEqual([(await last("t1")).reason, (await last("t1")).qty, (await last("t1")).after, (await last("t1")).date], ["Damaged / lost", -1, 14, today()]);
+  await staff("POST", "/api/stock", { deltas: { t1: 1 }, reason: "Free text" });
+  assert.equal((await last("t1")).reason, "Stock adjustment", "an unknown reason can't be written into the trail");
+
+  // Sales, returns and voids are recorded with the record they came from.
+  const items = [{ productId: "t1", name: "Trail Soap", qty: 3, price: 100, pct: 25 }];
+  const sold = await staff("PUT", "/api/c/txns/ts1", { data: { type: "sale", dealerId: "d1", date: today(), dueDate: day(30), items, amount: 225 } });
+  assert.equal(sold.status, 200);
+  const out = await last("t1");
+  assert.deepEqual([out.reason, out.qty, out.after, out.note, out.txnId], ["Sale", -3, 12, sold.data.data.no, "ts1"]);
+  await staff("PUT", "/api/c/txns/tr1", { data: { type: "return", dealerId: "d1", saleId: "ts1", date: today(), restock: true, items: [{ ...items[0], qty: 1 }], amount: 75 } });
+  assert.deepEqual([(await last("t1")).reason, (await last("t1")).qty, (await last("t1")).after], ["Return", 1, 13]);
+  await staff("PATCH", "/api/c/txns/tr1", { data: { voided: true, voidReason: "Mistake" } });
+  assert.deepEqual([(await last("t1")).reason, (await last("t1")).qty, (await last("t1")).after], ["Return voided", -1, 12]);
+
+  // A count where nothing changed is still recorded.
+  await staff("POST", "/api/stock", { deltas: {}, reason: "Stock count", note: "All matched", matched: "t1" });
+  assert.deepEqual([(await last("t1")).reason, (await last("t1")).qty], ["Stock count", 0]);
+
+  // A refused change leaves no record.
+  const n = (await trail("t1")).length;
+  assert.equal((await staff("POST", "/api/stock", { deltas: { t1: -999 } })).status, 409);
+  assert.equal((await trail("t1")).length, n);
+
+  // Nobody can write or change the trail directly.
+  const id = (await owner("GET", "/api/c/moves")).data.find((m) => m.data.productId === "t1").id;
+  for (const who of [owner, staff]) {
+    assert.equal((await who("PUT", "/api/c/moves/fake", { data: { productId: "t1", qty: 50, reason: "Received stock", date: today() } })).status, 403);
+    assert.equal((await who("PATCH", "/api/c/moves/" + id, { data: { qty: 50 } })).status, 403);
+    assert.equal((await who("DELETE", "/api/c/moves/" + id)).status, 403);
+  }
+
+  // The trail outlives the product, and says where the stock went.
+  await owner("PUT", "/api/c/products/t2", { data: { name: "Gone Soap", dealerPrice: 10, srp: 20, stock: 4 } });
+  assert.equal((await owner("DELETE", "/api/c/products/t2")).status, 200);
+  const gone = await trail("t2");
+  assert.deepEqual(gone.map((m) => [m.reason, m.qty, m.productName]), [["Starting stock", 4, "Gone Soap"], ["Product deleted", -4, "Gone Soap"]]);
+
+  // Example records leave no trace and can still be cleared.
+  await owner("PUT", "/api/c/products/t3", { data: { name: "Sample Soap", dealerPrice: 10, srp: 20, stock: 4, sample: true } });
+  assert.deepEqual(await trail("t3"), []);
+  assert.equal((await owner("PUT", "/api/c/moves/s1", { data: { productId: "t3", qty: 4, reason: "Starting stock", date: today(), sample: true } })).status, 200);
+  assert.equal((await owner("DELETE", "/api/c/moves/s1")).status, 200);
+
+  // Dealers never see it.
+  assert.deepEqual((await portal("GET", "/api/c/moves")).data, []);
+});

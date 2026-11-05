@@ -37,6 +37,35 @@ test("record a credit sale from the sale form", { skip }, async () => {
   await b.click("[data-close]");
 });
 
+test("stock in shows in the stock history with who and when", { skip }, async () => {
+  await b.signIn(app.base, app.jar.owner);
+  await b.click("[data-view=products]");
+  await b.click("[data-act=stock-in]");
+  await b.fill("#m-q", "7");
+  await b.fill("#m-note", "Delivery 42");
+  await b.click("#f button[type=submit]");
+  await b.waitFor("!document.querySelector('.sheet')");
+  await b.click("[data-act=stock-history]");
+  await b.waitFor("/Received stock · Delivery 42/.test(document.querySelector('#h-list')?.innerText||'')");
+  const row = await b.ev("document.querySelector('#h-list tbody tr').innerText");
+  assert.match(row, /Dish Soap/);
+  assert.match(row, /Stock in/);
+  assert.match(row, /\+7/);
+  assert.match(row, /\d{1,2}:\d{2}/, "shows the time");
+  assert.match(row, /\bowner\b/, "shows the username");
+  await b.fill("#h-k", "out");
+  await b.waitFor("!/Delivery 42/.test(document.querySelector('#h-list').innerText)");
+  await b.click("[data-back]");
+  await b.waitFor("!document.querySelector('.overlay')");
+  await b.click("[data-view=products]");
+  await b.click("tr[data-product]");
+  await b.waitFor("/Recent stock changes/.test(document.querySelector('.sheet')?.innerText||'')");
+  const recent = await b.ev("document.querySelector('.sheet').innerText");
+  assert.match(recent, /\bowner\b/, "recent changes show the username");
+  assert.doesNotMatch(recent, /a team member/);
+  await b.click("[data-back]");
+});
+
 test("record a payment and see the balance drop", { skip }, async () => {
   await b.click("[data-act=new-pay]");
   await b.fill("#y-dealer", "d1");
@@ -294,5 +323,36 @@ test("the owner gives a dealer portal access and the dealer signs in", { skip },
   await b.ev(`(()=>{ const bytes=Uint8Array.from(atob(${JSON.stringify(png)}),c=>c.charCodeAt(0)), dt=new DataTransfer(); dt.items.add(new File([bytes],"r.png",{type:"image/png"})); document.querySelector("#pf-file").files=dt.files; })()`);
   await b.click("#pf-send");
   await b.waitFor("/Waiting for the store/.test(document.body.innerText)");
+  assert.deepEqual(b.errors, []);
+});
+
+test("the app can be installed by staff and by dealers", { skip }, async () => {
+  const check = async (who) => {
+    const { result } = await b.cdp("Page.getInstallabilityErrors");
+    assert.deepEqual(result.installabilityErrors.map((x) => x.errorId), [], who);
+    await b.waitFor("navigator.serviceWorker.getRegistration().then(r=>!!r&&!!r.active)");
+  };
+  // The dealer from the previous test is still signed in.
+  await b.click("[data-tab=account]");
+  await b.waitFor("document.querySelector('[data-install-slot]')");
+  await check("dealer");
+  const offer = "(()=>{ const e=new Event('beforeinstallprompt'); e.prompt=async()=>{ window.asked=1; }; e.userChoice=Promise.resolve({outcome:'accepted'}); dispatchEvent(e); })()";
+  await b.ev(offer);
+  await b.click("[data-install]");
+  await b.waitFor("window.asked===1 && !document.querySelector('[data-install]')");
+  await b.click("#logout");
+  await b.waitFor("location.pathname==='/login'");
+  assert.equal(await b.ev("!!document.querySelector('link[rel=manifest]')"), true, "installable before signing in");
+  await b.waitFor("caches.keys().then(k=>!k.length)"); // A shared phone keeps nothing from the dealer.
+
+  // The previous test signed the owner out in the browser, which ended that session.
+  await app.api("owner", "POST", "/api/login", { username: "owner", password: "secret123" });
+  await b.signIn(app.base, app.jar.owner);
+  await check("staff");
+  await b.click(".tab[data-view=store]");
+  await b.click("[data-store-tab=System]");
+  await b.waitFor("document.querySelector('[data-install-slot]')");
+  await b.ev(offer);
+  await b.waitFor("document.querySelector('[data-install]')");
   assert.deepEqual(b.errors, []);
 });
