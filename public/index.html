@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0d6b5c">
-<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}body{margin:0;font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}body{margin:0;font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}img{max-width:100%}[hidden]{display:none!important}
+</style>
 <title>Dealer Credit Ledger</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -115,6 +116,9 @@ label.f,div.f{display:flex;flex-direction:column;gap:4px;font-size:13px;font-wei
 .empty h3{color:var(--fg);font-size:16px;margin-bottom:6px}
 .overlay{position:fixed;inset:0;background:rgba(5,15,13,.45);z-index:20;display:flex;justify-content:flex-end}
 .sheet{background:var(--bg);width:min(760px,100%);height:100%;overflow-y:auto;padding:calc(20px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) calc(40px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));box-shadow:-8px 0 30px rgba(0,0,0,.2)}
+.overlay.centered{justify-content:center;align-items:center;padding:24px}
+.overlay.centered .sheet{height:auto;max-height:100%;border-radius:16px;box-shadow:0 12px 48px rgba(0,0,0,.25)}
+@media(max-width:600px){.overlay.centered{padding:0}.overlay.centered .sheet{height:100%;border-radius:0}}
 .sheet-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px}
 .sheet-head h2{font-size:22px}
 .items{display:flex;flex-direction:column;gap:8px;margin:8px 0}
@@ -305,6 +309,35 @@ dl.kv dd{margin:0;overflow-wrap:anywhere}
 .progress{height:8px;background:var(--sunk);border-radius:4px;overflow:hidden}
 .progress i{display:block;height:100%;background:var(--accent);width:0}
 @media (prefers-reduced-motion:no-preference){.sheet{animation:slide .18s ease-out}@keyframes slide{from{transform:translateX(30px);opacity:.6}to{transform:none;opacity:1}}}
+
+/* Desktop sections */
+@media (min-width:701px){
+  body{padding-left:210px}
+  .sidebar{position:fixed;inset:0 auto 0 0;width:210px;z-index:6;background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;gap:6px;padding:24px 12px;overflow-y:auto}
+  .sidebar::before{content:"Workspace";font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);padding:8px 14px 18px}
+  .sidebar .tab{text-align:left;border:0;border-radius:8px;padding:12px 14px;white-space:normal}
+  .sidebar .tab::after{display:none}
+  .sidebar .tab[aria-current="page"]{background:var(--accent-soft);color:var(--accent)}
+  .sidebar .tab:hover{background:var(--sunk)}
+}
+@media print{.sidebar{display:none!important}body{padding-left:0!important}}
+
+.page-heading{margin-bottom:20px}.page-heading h2{font-size:26px}.page-heading p{margin:4px 0 0;color:var(--muted);font-size:13px}
+.sidebar-toggle{justify-content:flex-start;white-space:nowrap;min-height:42px;margin-bottom:12px}
+.nav-icon{display:inline-flex;flex:none}.nav-icon svg{width:20px;height:20px}
+@media(min-width:701px){
+  .sidebar::before{display:none}
+  .sidebar .tab{display:flex;align-items:center;gap:12px;min-height:46px}
+  .sidebar .tab[hidden]{display:none!important}
+  body.nav-collapsed{padding-left:72px}
+  body.nav-collapsed .sidebar{width:72px;padding-inline:8px}
+  body.nav-collapsed .sidebar .tab{justify-content:center;padding-inline:8px}
+  body.nav-collapsed .nav-label,body.nav-collapsed .sidebar .pill{display:none}
+  body.nav-collapsed .sidebar-toggle{justify-content:center;padding-inline:8px}
+}
+.sidebar-logout{position:sticky;bottom:0;z-index:1;background:var(--surface);display:flex;align-items:center;gap:12px;margin-top:auto;min-height:46px;flex-shrink:0}.sidebar-logout:hover{color:var(--bad)}
+@media(min-width:701px){body.nav-collapsed .sidebar-logout{justify-content:center;padding-inline:8px}}
+@media(prefers-reduced-motion:no-preference){.overlay.centered:not(.closing) .sheet{animation:centerIn .18s ease-out}@keyframes centerIn{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:none}}}
 </style>
 </head>
 <body>
@@ -319,18 +352,39 @@ dl.kv dd{margin:0;overflow-wrap:anywhere}
         <button class="btn" data-act="new-pay" type="button">+ Payment</button>
       </div>
     </div>
-    <nav class="tabs" aria-label="Sections">
+
+  </div>
+</header>
+    <nav class="tabs sidebar" id="sidebar" aria-label="Sections">
+      <button class="btn sidebar-toggle" id="sidebarToggle" type="button" aria-controls="sidebar" aria-expanded="true" title="Collapse sidebar"><span aria-hidden="true">☰</span><span class="nav-label">Collapse menu</span></button>
+      <button class="tab" data-view="dashboard" type="button">Dashboard</button>
       <button class="tab" data-view="overview" type="button">Overview</button>
       <button class="tab" data-view="orders" type="button" id="ordersTab" hidden>Orders <span class="pill bad" id="ordBadge" hidden></span></button>
       <button class="tab" data-view="collect" type="button">Collections</button>
       <button class="tab" data-view="dealers" type="button">Dealers</button>
       <button class="tab" data-view="products" type="button">Products</button>
+      <button class="tab" data-view="stock" type="button">Stock history</button>
       <button class="tab" data-view="activity" type="button">Transactions</button>
       <button class="tab" data-view="reports" type="button">Reports</button>
+      <button class="tab" data-view="profit" type="button">Profit reports</button>
+      <button class="tab" data-view="purchases" type="button">Purchase orders</button>
+      <button class="tab" data-view="expenses" type="button">Operating expenses</button>
+      <button class="tab" data-view="reorder" type="button">Reorder list</button>
+      <button class="tab" data-view="losses" type="button">Stock losses</button>
+      <button class="tab" data-view="controls" type="button">Approval controls</button>
+      <button class="tab" data-view="closing" type="button">Daily closing</button>
+      <button class="tab" data-view="shifts" type="button">Cashier shifts</button>
+      <button class="tab" data-view="periods" type="button">Period locks</button>
+      <button class="tab" data-view="duplicates" type="button">Duplicate watch</button>
+      <button class="tab" data-view="suppliers" type="button">Suppliers</button>
+      <button class="tab" data-view="batches" type="button">Batches &amp; expiry</button>
+      <button class="tab" data-view="reminders" type="button">Collection reminders</button>
+      <button class="tab" data-view="deliveries" type="button">Delivery proof</button>
+      <button class="tab" data-view="refunds" type="button">Customer refunds</button>
+      <button class="tab" data-view="bank" type="button">Bank reconciliation</button>
       <button class="tab" data-view="store" type="button">Store</button>
+      <button class="btn sidebar-logout" data-act="logout" type="button" title="Log out" aria-label="Log out"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3H4v18h5M9 12h12M17 8l4 4-4 4"/></svg></span><span class="nav-label">Log out</span></button>
     </nav>
-  </div>
-</header>
 <main class="wrap" id="main" aria-busy="true">
   <div class="kpis" aria-hidden="true"><div class="kpi skel-card"><i class="skel w40"></i><i class="skel w70 tall"></i><i class="skel w50"></i></div><div class="kpi skel-card"><i class="skel w40"></i><i class="skel w70 tall"></i><i class="skel w50"></i></div><div class="kpi skel-card"><i class="skel w40"></i><i class="skel w70 tall"></i><i class="skel w50"></i></div><div class="kpi skel-card"><i class="skel w40"></i><i class="skel w70 tall"></i><i class="skel w50"></i></div></div>
   <section class="panel" aria-label="Loading your ledger"><i class="skel w30"></i><i class="skel w100"></i><i class="skel w100"></i><i class="skel w80"></i><i class="skel w100"></i><p class="small muted" style="margin:10px 0 0">Loading dealers, products, credit sales and payments…</p></section>
@@ -340,6 +394,8 @@ dl.kv dd{margin:0;overflow-wrap:anywhere}
 <div id="sheetRoot"></div>
 
 <script src="/shim.js"></script>
+<script src="/allocations.js"></script>
+<script src="/insights.js"></script>
 <script src="/index.js"></script>
 
 </body>

@@ -7,7 +7,7 @@ const r2=n=>Math.round((Number(n)||0)*100)/100;
 const pad=n=>String(n).padStart(2,"0"); const ymd=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; const today=()=>ymd(new Date());
 const daysBetween=(a,b)=>Math.round((new Date(b+"T00:00:00")-new Date(a+"T00:00:00"))/864e5);
 const fmtDate=s=>s?new Date(s+"T00:00:00").toLocaleDateString("en-PH",{month:"short",day:"numeric",year:"numeric"}):"—";
-const LABEL={sale:"Delivery",payment:"Payment",return:"Return"};
+const LABEL={sale:"Delivery",payment:"Payment",return:"Return",refund:"Refund"};
 function toast(m){ document.querySelectorAll(".toast").forEach(x=>x.remove()); const t=document.createElement("div"); t.className="toast"; t.setAttribute("role","status"); t.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg><span></span>'; t.lastChild.textContent=m; document.body.appendChild(t); setTimeout(()=>t.remove(),2800); }
 async function api(method,url,body){ const orderId=url.startsWith("/api/c/orders/")?url.split("/").pop():null;const version=orderId&&S.orders.find(o=>o._id===orderId)?._version; const r=await fetch(url,{method,credentials:"same-origin",headers:{...(body?{"Content-Type":"application/json"}:{}),...(version?{"If-Match":String(version)}:{}),...(orderId&&method!=="GET"?{"Idempotency-Key":"portal_"+orderId+"_"+(!body?.data?.status?"new":version||"new")}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(30000)});
   if(r.status===401){ location.href="/login"; throw new Error("Signed out"); } const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(d.message||"Something went wrong. Try again."); return d; }
@@ -26,10 +26,11 @@ const ORD_C={new:"neutral",preparing:"warn",ready:"good",released:"neutral",canc
 const STEP={new:1,preparing:2,ready:3,released:4};
 const live=()=>S.txns.filter(t=>!t.voided).sort((a,b)=>(a.date||"").localeCompare(b.date||"")||(a.createdAt||0)-(b.createdAt||0));
 function compute(){
-  const tx=live(), t0=today(); const queue=[], settled=[]; let pool=0, run=0; const runAt=new Map();
-  tx.forEach(t=>{ run=r2(run+(t.type==="sale"?t.amount:-t.amount)); runAt.set(t,run);
-    if(t.type==="sale"){ let rem=t.amount; if(pool>0.004){ const ap=Math.min(pool,rem); pool=r2(pool-ap); rem=r2(rem-ap); } if(rem<=0.004) settled.push({t,paid:t.date}); else queue.push({t,rem}); }
-    else { let c=t.amount; while(c>0.004&&queue.length){ const q=queue[0]; const ap=Math.min(c,q.rem); q.rem=r2(q.rem-ap); c=r2(c-ap); if(q.rem<=0.004){ queue.shift(); settled.push({t:q.t,paid:t.date}); } } pool=r2(pool+c); } });
+  const tx=live(),t0=today(),queue=[],settled=[],runAt=new Map();let run=0;
+  tx.forEach(t=>{run=r2(run+(["sale","refund"].includes(t.type)?t.amount:-t.amount));runAt.set(t,run);});
+  const result=LedgerAllocations.compute(tx.map(t=>({id:t._id,data:t}))),paidAt=new Map();
+  for(const [id,c] of Object.entries(result.byCredit))for(const l of c.lines){const t=tx.find(t=>t._id===id);paidAt.set(l.id,[paidAt.get(l.id)||"",t.date].sort().pop());}
+  for(const s of result.sales){const t=tx.find(t=>t._id===s.id);if(s.remaining>0.004)queue.push({t,rem:s.remaining});else settled.push({t,paid:[t.date,paidAt.get(s.id)||t.date].sort().pop()});}
   const open=queue.map(q=>({...q,late:q.t.dueDate&&q.t.dueDate<t0?daysBetween(q.t.dueDate,t0):0}));
   const onTime=settled.filter(s=>!s.t.dueDate||s.paid<=s.t.dueDate).length;
   return {balance:run,open,overdue:r2(open.filter(o=>o.late).reduce((a,o)=>a+o.rem,0)),maxLate:open.reduce((m,o)=>Math.max(m,o.late),0),
@@ -57,7 +58,7 @@ function render(){
   html+=`<div class="tabs" role="tablist">${tabs.map(([k,l])=>`<button class="tab" role="tab" type="button" data-tab="${k}" aria-selected="${S.tab===k}">${l}</button>`).join("")}</div>`;
   if(S.tab==="unpaid") html+=c.open.length?`<div class="list">${c.open.slice().reverse().map(o=>`<button class="row" type="button" data-rc="${esc(o.t._id)}"><div><b>${esc(o.t.no||LABEL.sale)}</b><div class="small muted">Released ${fmtDate(o.t.date)} · due ${fmtDate(o.t.dueDate)}</div>${o.rem<o.t.amount-0.004?`<div class="small" style="color:var(--good)">${P(o.t.amount-o.rem)} of ${P(o.t.amount)} paid</div>`:""}</div><div class="r"><b class="num">${P(o.rem)}</b><div>${o.late?`<span class="pill bad">${o.late} days late</span>`:`<span class="pill neutral">Not yet due</span>`}</div></div></button>`).join("")}</div>`:`<div class="empty">You have no unpaid deliveries. Salamat po!</div>`;
   if(S.tab==="history"){ const all=S.txns.slice().sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.createdAt||0)-(a.createdAt||0));
-    html+=all.length?`<div class="list">${all.map(t=>`<button class="row ${t.voided?"void":""}" type="button" data-rc="${esc(t._id)}"><div><b>${esc(t.opening?"Opening balance":t.payKind==="partial"?"Partial payment":t.payKind==="full"?"Full payment":LABEL[t.type])} ${esc(t.no||"")}</b><div class="small muted">${fmtDate(t.date)}${t.type==="payment"?" · "+esc(t.method||""):""}${t.voided?" · cancelled":""}</div></div><div class="r"><b class="num amt">${t.type==="sale"?"":"−"}${P(t.amount)}</b>${t.voided?"":`<div class="small muted num">Balance ${P(c.runAt.get(t))}</div>`}</div></button>`).join("")}</div>`:`<div class="empty">No transactions yet.</div>`; }
+    html+=all.length?`<div class="list">${all.map(t=>`<button class="row ${t.voided?"void":""}" type="button" data-rc="${esc(t._id)}"><div><b>${esc(t.opening?"Opening balance":t.payKind==="partial"?"Partial payment":t.payKind==="full"?"Full payment":LABEL[t.type])} ${esc(t.no||"")}</b><div class="small muted">${fmtDate(t.date)}${t.type==="payment"?" · "+esc(t.method||""):""}${t.voided?" · cancelled":""}</div></div><div class="r"><b class="num amt">${["sale","refund"].includes(t.type)?"":"−"}${P(t.amount)}</b>${t.voided?"":`<div class="small muted num">Balance ${P(c.runAt.get(t))}</div>`}</div></button>`).join("")}</div>`:`<div class="empty">No transactions yet.</div>`; }
   if(S.tab==="catalog"){ const pct=d.discountPct!=null&&d.discountPct!==""?Number(d.discountPct):Number(s.discountPct??25); const q=S.q.toLowerCase();
     const list=S.products.filter(p=>!q||[p.name,p.code,p.category].join(" ").toLowerCase().includes(q)).sort((a,b)=>a.name.localeCompare(b.name));
     html+=`<label style="margin-bottom:12px">Search products<input id="q" type="search" value="${esc(S.q)}" placeholder="Name, code or category"></label>
@@ -83,8 +84,8 @@ function receipt(id){
     ${t.voided?`<p style="color:#b3261e;font-weight:700">This record was cancelled.</p>`:""}
     ${items.length?`<table><thead><tr><th>Item</th><th class="r">Qty</th><th class="r">Amount</th></tr></thead><tbody>${items.map(i=>`<tr><td>${esc(i.name)}<div style="color:#666;font-size:12px">${P(i.price)} each</div></td><td class="r">${i.qty}</td><td class="r">${P(i.qty*i.price)}</td></tr>`).join("")}</tbody></table>
       ${t.pctDiscount?`<div style="display:flex;justify-content:space-between"><span>Total at SRP</span><span>${P(t.subtotal)}</span></div><div style="display:flex;justify-content:space-between"><span>${discLabel(t)}</span><span>−${P(t.pctDiscount)}</span></div>`:""}${t.discount?`<div style="display:flex;justify-content:space-between"><span>Extra discount</span><span>−${P(t.discount)}</span></div>`:""}`:""}
-    <div class="rc-total" style="margin-top:8px"><span>${t.type==="sale"?"Total on credit":t.type==="payment"?"Amount received":"Total credited"}</span><b>${P(t.amount)}</b></div>
-    ${t.type==="sale"?`<p>Due date: <b>${fmtDate(t.dueDate)}</b></p>`:""}${t.type==="payment"?`<p>Paid by ${esc(t.method||"")}${t.ref?" · Ref "+esc(t.ref):""}</p>`:""}
+    <div class="rc-total" style="margin-top:8px"><span>${t.type==="sale"?"Total on credit":t.type==="payment"?"Amount received":t.type==="refund"?"Amount refunded":"Total credited"}</span><b>${P(t.amount)}</b></div>
+    ${t.type==="sale"?`<p>Due date: <b>${fmtDate(t.dueDate)}</b></p>`:""}${["payment","refund"].includes(t.type)?`<p>Method ${esc(t.method||"")}${t.ref?" · Ref "+esc(t.ref):""}</p>`:""}
     ${t.voided?"":`<p>Your balance after this: <b>${P(c.runAt.get(t))}</b></p>`}
     ${t.type==="payment"&&(t.applied||[]).length?`<table><thead><tr><th>Applied to</th><th class="r">Paid</th><th class="r">Still owed</th></tr></thead><tbody>${t.applied.map(a=>`<tr><td>${esc(a.no)}</td><td class="r">${P(a.amount)}</td><td class="r">${a.left>0.004?P(a.left):"Fully paid"}</td></tr>`).join("")}</tbody></table>`:""}
     <p style="font-size:12px;color:#666;text-align:center;margin-bottom:0">This is not an official receipt.</p></article></div></div>`;

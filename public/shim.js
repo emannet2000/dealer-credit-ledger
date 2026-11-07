@@ -44,13 +44,15 @@
     const s = col(c);
     if (s.loading) { s.again = true; return s.loading; }
     s.loading = (async () => {
+      const wasLoaded=s.loaded,hadError=!!s.error;let changed=true;
       try {
         const rows = await api("GET", "/api/c/" + c);
+        changed=rows.length!==s.docs.size||rows.some(r=>{const old=s.docs.get(r.id);return !old||old._version!==r.version||JSON.stringify(old)!==JSON.stringify(r.data);});
         s.docs = new Map(rows.map((r) => [r.id, Object.freeze(Object.defineProperty({ ...r.data }, "_version", { value: r.version }))]));
         s.loaded = true; s.error = null;
       } catch (e) { s.error = e; }
       s.loading = null;
-      emit(c);
+      if(changed||hadError||!wasLoaded)emit(c);
       if (s.again) { s.again = false; return refresh(c); }
     })();
     return s.loading;
@@ -71,8 +73,8 @@
     return {
       id, path: c + "/" + id,
       async get() { await refresh(c); if (col(c).error) throw col(c).error; return snapDoc(id, col(c).docs.get(id)); },
-      async set(data, opts = {}) { const result = await api("PUT", `/api/c/${c}/${encodeURIComponent(id)}`, { data }, { ...(opts.restore ? { "X-Restore": "1" } : {}), ...((opts.version ?? col(c).docs.get(id)?._version) ? { "If-Match": String(opts.version ?? col(c).docs.get(id)._version) } : {}) }); await refresh(c); if (["txns", "moves", "orders"].includes(c)) await Promise.all(["products", "orders", "txns", "approvals"].filter(k => k !== c && cols.has(k)).map(refresh)); return result; },
-      async update(data) { await api("PATCH", `/api/c/${c}/${encodeURIComponent(id)}`, { data }, col(c).docs.get(id)?._version ? { "If-Match": String(col(c).docs.get(id)._version) } : {}); await refresh(c); },
+      async set(data, opts = {}) { const result = await api("PUT", `/api/c/${c}/${encodeURIComponent(id)}`, { data }, { ...(opts.restore ? { "X-Restore": "1" } : {}), ...((opts.version ?? col(c).docs.get(id)?._version) ? { "If-Match": String(opts.version ?? col(c).docs.get(id)._version) } : {}) }); await refresh(c); if (["txns", "moves", "orders"].includes(c)&&!(c==="txns"&&["payment","refund"].includes(data.type))) await Promise.all(["products", "orders", "txns", "approvals","batches"].filter(k => k !== c && cols.has(k)).map(refresh)); return result; },
+      async update(data, opts = {}) { const version=opts.version??col(c).docs.get(id)?._version; await api("PATCH", `/api/c/${c}/${encodeURIComponent(id)}`, { data }, version ? { "If-Match": String(version) } : {}); await refresh(c); },
       async delete() { await api("DELETE", `/api/c/${c}/${encodeURIComponent(id)}`); await refresh(c); },
       onSnapshot(next, error) {
         const s = col(c);
@@ -153,11 +155,30 @@
     createUser: (u) => api("POST", "/api/users", u).then((r) => (users(true), r)),
     updateUser: (id, u) => api("PATCH", "/api/users/" + encodeURIComponent(id), u).then((r) => (users(true), r)),
     changePassword: (current, next) => api("POST", "/api/me/password", { current, next }),
-    request: api,
+    request: async (...args)=>{
+      const out=await api(...args),[method,url]=args;let affected=[];
+      if(method!=="GET"){
+        if(url.startsWith("/api/purchases/"))affected=/\/(receive|returns)(\/|$)/.test(url)?["purchases","products","moves","batches"]:["purchases"];
+        else if(url.startsWith("/api/authorizations")){affected=["authorizations"];if(out.posted){const c=out.request.data.collection;affected.push(...(c==="stockBatch"||c==="moves"?["moves","products","batches"]:[c]));}}
+        else if(url.startsWith("/api/daily-closing")&&!url.endsWith("/preview"))affected=["dailyClosings"];
+        else if(url.startsWith("/api/shifts"))affected=["cashierShifts"];
+        else if(url.startsWith("/api/periods")&&!url.endsWith("/preview"))affected=["periodLocks"];
+        else if(url.startsWith("/api/duplicates")&&url.includes("/review"))affected=["duplicateReviews"];
+        else if(url.startsWith("/api/supplier-applications"))affected=["supplierApplications","purchases"];
+        else if(url.startsWith("/api/customer-refunds"))affected=["txns"];
+        else if(url.startsWith("/api/reminders"))affected=["reminders","dealers"];
+        else if(url.startsWith("/api/deliveries"))affected=["deliveries"];
+        else if(url.startsWith("/api/batches/"))affected=["batches","products"];
+        else if(url.startsWith("/api/bank/"))affected=["bankStatements"];
+        await Promise.all([...new Set(affected)].filter(c=>cols.has(c)).map(refresh));
+      }
+      return out;
+    },
+    uploadDocument: (blob,type)=>api("POST","/api/documents",blob,{"Content-Type":type||blob.type||"application/pdf"}),
     backup: () => api("GET", "/api/backup"),
     previewImport: (kind, input) => api("POST", "/api/imports/preview", { kind, input }),
     confirmImport: async id => { const out = await api("POST", "/api/imports/" + id + "/confirm", {}); await Promise.all([...cols.keys()].map(refresh)); return out; },
-    audit: (limit = 150) => api("GET", "/api/audit?limit=" + limit),
+    audit: (limit = 150, kind = "") => api("GET", "/api/audit?limit=" + limit + "&kind=" + encodeURIComponent(kind)),
     logout: () => api("POST", "/api/logout").finally(() => (location.href = "/login")),
   });
 })();

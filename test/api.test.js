@@ -82,7 +82,7 @@ test("owner adds staff and viewer accounts; wrong passwords are rejected", async
 test("credit sales get sequential DR numbers and stock moves atomically", async () => {
   await owner("PUT", "/api/c/settings/store", { data: { holdDays: 60, discountPct: 25 } });
   await owner("PUT", "/api/c/dealers/d1", { data: { name: "Maria", creditLimit: 5000, terms: 30 } });
-  await owner("PUT", "/api/c/products/p1", { data: { name: "Soap", dealerPrice: 75, srp: 100, stock: 50 } });
+  await owner("PUT", "/api/c/products/p1", { data: { name: "Soap", dealerPrice: 75, srp: 100, stock: 50, purchaseCost: 50 } });
   const a = await staff("PUT", "/api/c/txns/s1", { data: { type: "sale", dealerId: "d1", date: day(0), dueDate: day(30), items: [{ productId: "p1", name: "Soap", qty: 4, price: 100 }], subtotal: 400, discountPct: 25, pctDiscount: 100, amount: 300 } });
   const b = await staff("PUT", "/api/c/txns/s2", { data: { type: "sale", dealerId: "d1", date: day(0), dueDate: day(30), items: [], amount: 100, no: "DR-00001" } });
   assert.equal(a.data.data.no, "DR-00001");
@@ -158,6 +158,7 @@ test("dealer portal accounts see only their own records and can't write", async 
   const txns = (await portal("GET", "/api/c/txns")).data;
   assert.ok(txns.length > 0 && txns.every((t) => t.data.dealerId === "d1"), "only own transactions");
   assert.ok(txns.every((t) => t.data.createdBy === undefined), "staff ids hidden");
+  assert.ok(txns.every(t=>(t.data.items||[]).every(i=>i.unitCost===undefined)), "purchase cost snapshots hidden from dealers");
   const prods = (await portal("GET", "/api/c/products")).data;
   assert.ok(prods.every((p) => p.data.dealerPrice === undefined && p.data.stock === undefined), "no cost or stock numbers");
   assert.deepEqual((await portal("GET", "/api/c/moves")).data, []);
@@ -230,4 +231,23 @@ test("promos and per-product discounts price online orders; staff can't change t
 test("automatic backup writes a database copy", async () => {
   const f = await backupNow();
   assert.ok(fs.statSync(f).size > 0);
+});
+
+test("login and logout history records the actor and time and invalidates the session", async () => {
+  const person = client();
+  const started = Date.now();
+  assert.equal((await person("POST", "/api/login", { username: "owner", password: "OwnerSecret123!" })).status, 200);
+  assert.equal((await person("POST", "/api/logout")).status, 200);
+  assert.equal((await person("GET", "/api/me")).status, 401);
+  // Repeated or anonymous logout must not invent an extra history entry.
+  assert.equal((await person("POST", "/api/logout")).status, 200);
+  const history = await owner("GET", "/api/audit?kind=auth&limit=500");
+  assert.equal(history.status, 200);
+  assert.ok(history.data.every(a => ["login", "logout"].includes(a.action)));
+  const events = history.data.filter(a => a.at >= started && a.user_name === "Owner");
+  assert.deepEqual(events.map(a => a.action), ["logout", "login"]);
+  assert.equal((await anon("GET", "/api/audit?kind=auth")).status, 401);
+  assert.equal((await viewer("GET", "/api/audit?kind=auth")).status, 403);
+  const activity = await owner("GET", "/api/audit?limit=500");
+  assert.ok(activity.data.some(a => a.action === "logout" && a.user_name === "Owner"));
 });
