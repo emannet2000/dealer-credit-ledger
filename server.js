@@ -11,9 +11,17 @@ if (fs.existsSync(envFile)) {
 }
 process.env.TZ = process.env.TZ || "Asia/Manila";
 
+// Enforce HTTPS in production
+if (process.env.NODE_ENV === "production" && process.env.COOKIE_SECURE !== "true") {
+  console.error("\n⚠️  SECURITY WARNING: Running in production mode without HTTPS!");
+  console.error("   Set COOKIE_SECURE=true in your .env file and ensure your app is behind HTTPS.");
+  console.error("   The application will not start until this is fixed.\n");
+  process.exit(1);
+}
+
 const { createApp } = require("./lib/app");
 const { app, close, backupNow, dataDir } = createApp({ dataDir: process.env.DATA_DIR || path.join(__dirname, "data") });
-const port = Number(process.env.PORT) || 4000;
+const port = Number(process.env.PORT) || 3330;
 
 const server = app.listen(port, () => {
   console.log(`Dealer Credit Ledger running at http://localhost:${port}`);

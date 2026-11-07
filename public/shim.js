@@ -3,17 +3,35 @@
    (collections, documents, live snapshots, users, photos, downloads). */
 (() => {
   "use strict";
+  const retryKeys = new Map();
+  const retryId = () => crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
   async function api(method, url, body, headers = {}) {
+    let fingerprint;
+    if (!["GET", "HEAD"].includes(method)) {
+      fingerprint = method + url + JSON.stringify(body);
+      if (!retryKeys.has(fingerprint)) retryKeys.set(fingerprint, retryId());
+      headers = { "Idempotency-Key": retryKeys.get(fingerprint), ...headers };
+    }
     const isBlob = typeof Blob !== "undefined" && body instanceof Blob;
-    const r = await fetch(url, {
-      method, credentials: "same-origin",
-      headers: { ...(body !== undefined && !isBlob ? { "Content-Type": "application/json" } : {}), ...headers },
-      body: body === undefined ? undefined : isBlob ? body : JSON.stringify(body),
-    });
-    if (r.status === 401) { location.href = "/login"; throw { code: "unauthenticated", message: "Signed out" }; }
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw { code: data.code || (r.status === 413 ? "too_large" : "unavailable"), message: data.message || "Request failed", userMsg: data.message };
-    return data;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+    try {
+      const r = await fetch(url, {
+        method, credentials: "same-origin", signal: controller.signal,
+        headers: { ...(body !== undefined && !isBlob ? { "Content-Type": "application/json" } : {}), ...headers },
+        body: body === undefined ? undefined : isBlob ? body : JSON.stringify(body),
+      });
+      if (r.status === 401) { location.href = "/login"; throw { code: "unauthenticated", message: "Signed out" }; }
+      const data = await r.json();
+      if (!r.ok) throw { code: data.code || (r.status === 413 ? "too_large" : "unavailable"), message: data.message || "Request failed", userMsg: data.message };
+      if (fingerprint) retryKeys.delete(fingerprint);
+      return data;
+    } catch (e) {
+      if (controller.signal.aborted) throw { code: "unavailable", message: "The server took too long to respond. Check your connection and retry." };
+      throw e;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   /* ---------- live collections ---------- */
@@ -28,7 +46,7 @@
     s.loading = (async () => {
       try {
         const rows = await api("GET", "/api/c/" + c);
-        s.docs = new Map(rows.map((r) => [r.id, Object.freeze(r.data)]));
+        s.docs = new Map(rows.map((r) => [r.id, Object.freeze(Object.defineProperty({ ...r.data }, "_version", { value: r.version }))]));
         s.loaded = true; s.error = null;
       } catch (e) { s.error = e; }
       s.loading = null;
@@ -52,13 +70,13 @@
   function docRef(c, id) {
     return {
       id, path: c + "/" + id,
-      async get() { await refresh(c); return snapDoc(id, col(c).docs.get(id)); },
-      async set(data, opts) { await api("PUT", `/api/c/${c}/${encodeURIComponent(id)}`, { data }, opts && opts.restore ? { "X-Restore": "1" } : {}); await refresh(c); },
-      async update(data) { await api("PATCH", `/api/c/${c}/${encodeURIComponent(id)}`, { data }); await refresh(c); },
+      async get() { await refresh(c); if (col(c).error) throw col(c).error; return snapDoc(id, col(c).docs.get(id)); },
+      async set(data, opts = {}) { const result = await api("PUT", `/api/c/${c}/${encodeURIComponent(id)}`, { data }, { ...(opts.restore ? { "X-Restore": "1" } : {}), ...((opts.version ?? col(c).docs.get(id)?._version) ? { "If-Match": String(opts.version ?? col(c).docs.get(id)._version) } : {}) }); await refresh(c); if (["txns", "moves", "orders"].includes(c)) await Promise.all(["products", "orders", "txns", "approvals"].filter(k => k !== c && cols.has(k)).map(refresh)); return result; },
+      async update(data) { await api("PATCH", `/api/c/${c}/${encodeURIComponent(id)}`, { data }, col(c).docs.get(id)?._version ? { "If-Match": String(col(c).docs.get(id)._version) } : {}); await refresh(c); },
       async delete() { await api("DELETE", `/api/c/${c}/${encodeURIComponent(id)}`); await refresh(c); },
       onSnapshot(next, error) {
         const s = col(c);
-        const fn = () => (s.error && !s.loaded ? error && error(s.error) : next(snapDoc(id, s.docs.get(id))));
+        const fn = () => (s.error ? error && error(s.error) : next(snapDoc(id, s.docs.get(id))));
         s.listeners.add(fn); connectEvents();
         if (s.loaded) setTimeout(fn, 0); else refresh(c);
         return () => s.listeners.delete(fn);
@@ -70,11 +88,11 @@
       path: c,
       doc: (id) => docRef(c, id || newId()),
       async add(data) { const r = docRef(c, newId()); await r.set(data); return r; },
-      async get() { await refresh(c); const docs = [...col(c).docs].map(([id, d]) => snapDoc(id, d)); return { docs, size: docs.length, empty: !docs.length, metadata: meta }; },
+      async get() { await refresh(c); if (col(c).error) throw col(c).error; const docs = [...col(c).docs].map(([id, d]) => snapDoc(id, d)); return { docs, size: docs.length, empty: !docs.length, metadata: meta }; },
       onSnapshot(next, error) {
         const s = col(c);
         const fn = () => {
-          if (s.error && !s.loaded) return error && error(s.error);
+          if (s.error) return error && error(s.error);
           const docs = [...s.docs].map(([id, d]) => snapDoc(id, d));
           next({ docs, size: docs.length, empty: !docs.length, metadata: meta, docChanges: () => [] });
         };
@@ -88,7 +106,6 @@
   const db = Object.freeze({
     collection: colRef,
     doc: (p) => { const [c, id] = split(p); return docRef(c, id); },
-    async adjustStock(deltas) { await api("POST", "/api/stock", { deltas }); await refresh("products"); },
   });
 
   /* ---------- people ---------- */
@@ -136,6 +153,10 @@
     createUser: (u) => api("POST", "/api/users", u).then((r) => (users(true), r)),
     updateUser: (id, u) => api("PATCH", "/api/users/" + encodeURIComponent(id), u).then((r) => (users(true), r)),
     changePassword: (current, next) => api("POST", "/api/me/password", { current, next }),
+    request: api,
+    backup: () => api("GET", "/api/backup"),
+    previewImport: (kind, input) => api("POST", "/api/imports/preview", { kind, input }),
+    confirmImport: async id => { const out = await api("POST", "/api/imports/" + id + "/confirm", {}); await Promise.all([...cols.keys()].map(refresh)); return out; },
     audit: (limit = 150) => api("GET", "/api/audit?limit=" + limit),
     logout: () => api("POST", "/api/logout").finally(() => (location.href = "/login")),
   });

@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test test/*.test.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js",
     "import": "node scripts/import-backup.js",
     "reset-password": "node scripts/reset-password.js"
   },
@@ -18,6 +18,6 @@
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^13.0.3",
-    "express": "^4.21.2"
+    "express": "^4.22.3"
   }
 }

@@ -59,13 +59,13 @@ cp .env.example .env
 npm start
 ```
 
-Open http://localhost:3000. The first visit asks you to create the **owner** account. After that, add staff from **Store → Team accounts**.
+Open http://localhost:3330. The first visit asks you to create the **owner** account. After that, add staff from **Store → Team accounts**.
 
 ## Settings (`.env`)
 
 | Setting | Default | What it does |
 |---|---|---|
-| `PORT` | `3000` | Web server port |
+| `PORT` | `3330` | Web server port |
 | `DATA_DIR` | `./data` | Where the database, photos and daily backups are stored. **Back up this folder.** |
 | `COOKIE_SECURE` | `false` | Set to `true` when the site uses HTTPS |
 | `TZ` | `Asia/Manila` | Time zone for "today", due dates and staff edit limits |
@@ -110,6 +110,8 @@ On Railway, Render or Fly.io, attach a volume mounted at `/data`.
 
 ```bash
 npm run import -- path/to/ledger-backup-YYYY-MM-DD.json
+# Review the new/overwritten records, then confirm the printed preview ID:
+npm run import -- --confirm <preview-id>
 ```
 
 You can also sign in as the owner and use **Store → Restore from backup**. Photos aren't inside backup files, so add them again from the Products tab.
@@ -154,3 +156,21 @@ test/                automated API tests
 
 - DR/OR numbers are for internal tracking. They aren't BIR-registered official receipts.
 - The app is built for one business with a small team. For many branches, separate stores or thousands of users, plan a move to PostgreSQL.
+
+## Transaction and review workflows
+
+- Saving a sale or return updates its stock in the same database transaction. A sale marked paid on release also creates its linked payment atomically. Edit or void that sale to correct both records together.
+- The browser reuses the pending operation's retry key after a failed connection. The server persists its response, so a retry returns the same receipt without posting a second transaction. API clients should send an `Idempotency-Key` header for mutations and reuse it only for retries of the same operation.
+- Transaction corrections require a reason and the record version in `If-Match`. Original values are kept in **Transaction → Correction history**. Voids reverse balances and stock; financial records cannot be permanently deleted. Staff can correct only their own entries from today; owners and editors can correct other entries.
+- Payment receipts and transaction details show server-calculated FIFO allocations. Advances remain credit until a delivery consumes them. Allocations are recalculated after corrections or voids; they describe the current ledger.
+- **Dealer → Statement by period / Print** produces opening balance, period transactions, closing balance, and outstanding deliveries. Statements can be printed or exported as CSV. Dealers may request statements only for their own account through the API.
+- Staff can request a blocked credit sale from the sale form. The owner reviews it in **Store → Credit approvals**, supplies a decision reason, and approves or rejects it. Approval lasts 24 hours, belongs to the requester and the exact sale reviewed, and can be consumed once. Owners can release directly with an override reason.
+- Starting preparation reserves an order's stock. Available stock excludes reservations. Cancellation frees the reservation. Recording the linked credit sale releases the order and consumes stock atomically. Released or cancelled orders cannot be moved backwards.
+- **Store → Reconcile collections** compares recorded payments with counted totals for every payment method over a date range. Discrepancies require an explanation. Closing locks payments in that period; only the owner can reopen it, with a reason. Preview again if payment totals changed before confirmation.
+- Catalog imports and backup restores require a server preview. Review exact record IDs, current/incoming values, duplicate codes or numbers, references, and validation errors before confirming. The whole import commits together; invalid imports write no ledger records. A preview expires in 15 minutes and becomes stale if the ledger changes.
+- A uniquely named SQLite safety backup is created before each confirmed import. These `before-import-*.db` files are retained separately from the normal daily-backup retention. Copy them off the server regularly and remove old safety copies according to your retention policy.
+- JSON backups include ledger records, approvals, reconciliations, and correction history. Accounts, sessions, and image files are excluded. Restored pending or approved credit requests require a fresh owner review. Existing records absent from a backup are kept.
+
+Database migration 4 adds durable retry receipts and import previews automatically on startup. Use a copy of the production data folder to rehearse the upgrade before deploying. Older clients must be refreshed because stock updates now happen on the server; the separate `/api/stock` mutation is retired.
+
+`npm test` runs API, migration, retry, financial workflow, and browser acceptance checks. The browser check uses `CHROME_PATH` or an installed Chromium executable and is skipped when Chromium is absent.
