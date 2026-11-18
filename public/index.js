@@ -336,9 +336,11 @@ function vDashboard(){
   const payments=live.filter(t=>t.type==="payment"&&t.date===date).reduce((n,t)=>n+t.amount,0);
   const products=activeProducts(), low=products.filter(([,p])=>p.reorderLevel!=null&&p.stock<=p.reorderLevel).length;
   const pending=activeOrders().filter(([,o])=>o.status==="new").length;
+  const dealers=activeDealers(), owing=dealers.filter(([id])=>status(id).balance>0).length;
   const recent=[...S.txns.entries()].sort((a,b)=>(b[1].createdAt||0)-(a[1].createdAt||0)).slice(0,6);
   return sampleBanner()+healthNotices()+`<div class="panel-head"><div><p class="small muted">${fmtDate(date)} · Your daily business snapshot</p></div></div>
   <div class="kpis">
+    <div class="kpi"><div class="lbl">Total dealers</div><div class="val num">${dealers.length}</div><div class="sub">${owing} with an open balance</div></div>
     <div class="kpi"><div class="lbl">Today's credit sales</div><div class="val num">${P(sales)}</div></div>
     <div class="kpi good"><div class="lbl">Today's collections</div><div class="val num">${P(payments)}</div></div>
     <div class="kpi"><div class="lbl">New orders</div><div class="val num">${pending}</div></div>
@@ -634,8 +636,10 @@ function receiptText(id){
   L.push(s.storeName||"Dealer Credit Ledger"); if(s.address||s.phone) L.push([s.address,s.phone].filter(Boolean).join(" · "));
   L.push("",`${t.opening?"OPENING BALANCE":RC_TITLE[t.type]}  ${t.no||""}`,`Date: ${fmtDate(t.date)}`,`Dealer: ${d.name}${d.phone?" ("+d.phone+")":""}`);
   if(t.voided) L.push("*** VOIDED ***");
-  if(t.items&&t.items.length){ L.push(""); t.items.forEach((i,k)=>L.push(`${k+1}. ${i.name}\n   ${i.qty} × ${P(i.price)} = ${P(i.qty*i.price)}`)); L.push("");
-    if(t.pctDiscount||t.discount) L.push(`${t.pctDiscount?"Total at SRP":"Subtotal"}: ${P(t.subtotal)}`);
+  if(t.items&&t.items.length){ L.push(""); t.items.forEach((i,k)=>{ const take=bundleTakeOf(i); L.push(`${k+1}. ${i.name}\n   ${i.qty} × ${P(i.price)}${take?` (${take} at ${P(bundlePriceOf(i))})`:""} = ${P(lineTotal(i))}`); }); L.push("");
+    const bd=bundleDiscountOf(t);
+    if(t.pctDiscount||t.discount||bd) L.push(`${t.pctDiscount||bd?"Total at SRP":"Subtotal"}: ${P(t.subtotal)}`);
+    if(bd) L.push(`Bundle promo: −${P(bd)}`);
     if(t.pctDiscount) L.push(`${discLabel(t)}: −${P(t.pctDiscount)}`);
     if(t.discount) L.push(`Extra discount: −${P(t.discount)}`); }
   L.push(t.type==="sale"?`TOTAL ON CREDIT: ${P(t.amount)}`:t.type==="payment"?`AMOUNT RECEIVED: ${P(t.amount)}`:`TOTAL CREDITED: ${P(t.amount)}`);
@@ -662,8 +666,8 @@ function receiptSheet(id){
         ${t.type==="payment"?`<dt>Paid by</dt><dd>${esc(t.method)}${t.ref?" · Ref "+esc(t.ref):""}</dd>${t.payKind?`<dt>Payment</dt><dd><b>${{full:"Full payment",partial:"Partial payment",advance:"Advance payment"}[t.payKind]}</b></dd>`:""}`:""}</dl>
       ${t.type==="payment"&&(t.applied||[]).length?`<table class="rc-tbl"><thead><tr><th>Applied to</th><th class="r">Paid now</th><th class="r">Still owed</th></tr></thead><tbody>${t.applied.map(a=>`<tr><td>${esc(a.no)}</td><td class="r num">${P(a.amount)}</td><td class="r num">${a.left>0.004?P(a.left):"Fully paid"}</td></tr>`).join("")}</tbody></table>`:""}
       ${items.length?`<table class="rc-tbl"><thead><tr><th>#</th><th>Item</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Amount</th></tr></thead><tbody>
-        ${items.map((i,k)=>`<tr><td class="num">${k+1}</td><td>${esc(i.name)}${i.promo?" <small>(promo)</small>":""}${t.discountPct==null&&i.pct!=null?` <small>(less ${i.pct}%)</small>`:""}</td><td class="r num">${i.qty}</td><td class="r num">${P(i.price)}</td><td class="r num">${P(i.qty*i.price)}</td></tr>`).join("")}</tbody>
-        <tfoot>${t.pctDiscount||t.discount?`<tr><td colspan="4" class="r">${t.pctDiscount?"Total at SRP":"Subtotal"}</td><td class="r num">${P(t.subtotal)}</td></tr>`:""}${t.pctDiscount?`<tr><td colspan="4" class="r">${discLabel(t)}</td><td class="r num">−${P(t.pctDiscount)}</td></tr>`:""}${t.discount?`<tr><td colspan="4" class="r">Extra discount</td><td class="r num">−${P(t.discount)}</td></tr>`:""}</tfoot></table>`:""}
+        ${items.map((i,k)=>{ const take=bundleTakeOf(i); return `<tr><td class="num">${k+1}</td><td>${esc(i.name)}${i.promo?" <small>(promo)</small>":""}${take?` <small>(${take} at ${P(bundlePriceOf(i))})</small>`:""}${t.discountPct==null&&i.pct!=null?` <small>(less ${i.pct}%)</small>`:""}</td><td class="r num">${i.qty}</td><td class="r num">${P(i.price)}</td><td class="r num">${P(lineTotal(i))}</td></tr>`; }).join("")}</tbody>
+        <tfoot>${t.pctDiscount||t.discount||bundleDiscountOf(t)?`<tr><td colspan="4" class="r">${t.pctDiscount||bundleDiscountOf(t)?"Total at SRP":"Subtotal"}</td><td class="r num">${P(t.subtotal)}</td></tr>`:""}${bundleDiscountOf(t)?`<tr><td colspan="4" class="r">Bundle promo</td><td class="r num">−${P(bundleDiscountOf(t))}</td></tr>`:""}${t.pctDiscount?`<tr><td colspan="4" class="r">${discLabel(t)}</td><td class="r num">−${P(t.pctDiscount)}</td></tr>`:""}${t.discount?`<tr><td colspan="4" class="r">Extra discount</td><td class="r num">−${P(t.discount)}</td></tr>`:""}</tfoot></table>`:""}
       <div class="rc-total"><span>${t.type==="sale"?"Total on credit":t.type==="payment"?"Amount received":"Total credited"}</span><b class="num">${P(t.amount)}</b></div>
       ${t.voided?"":`<p class="rc-bal">Balance after this: <b class="num">${P(balanceAfter(t))}</b></p>`}
       ${t.note&&t.note!=="Opening balance"?`<p class="small">Note: ${esc(t.note)}</p>`:""}
@@ -749,8 +753,8 @@ function orderSheet(id){
     ${d&&st.maxLate>holdDays()&&open?`<div class="notice bad"><p><b>This dealer is on credit hold</b> (${st.maxLate} days late). Collect payment before releasing${S.canAdmin?", or approve the release":""}.</p></div>`:""}
     ${open&&short.length?`<div class="notice warn"><p><b>Not enough stock</b> for ${short.map(i=>esc(i.name)).join(", ")}.</p></div>`:""}
     <section class="panel" style="margin-bottom:16px"><h2>Items to prepare</h2><div class="tbl-wrap"><table><thead><tr><th>#</th><th>Product</th><th class="r">Qty</th><th class="r">In stock</th><th class="r">Amount</th></tr></thead><tbody>
-      ${items.map((i,k)=>{ const p=S.products.get(i.productId); const ok=p&&p.stock>=i.qty; return `<tr><td class="muted num">${k+1}</td><td><div class="prod-cell">${thumb(p,1)}<span>${esc(i.name)}</span></div></td><td class="r num"><b>${i.qty}</b></td><td class="r num">${p?(ok?p.stock:`<span class="pill bad">${p.stock}</span>`):"—"}</td><td class="r num">${P(i.qty*i.price)}</td></tr>`; }).join("")}</tbody>
-      <tfoot><tr><td colspan="4" class="r">Total at SRP</td><td class="r num">${P(o.subtotal)}</td></tr><tr><td colspan="4" class="r">${discLabel(o)}</td><td class="r num">−${P(o.pctDiscount)}</td></tr><tr><td colspan="4" class="r">Estimated total</td><td class="r num">${P(o.amount)}</td></tr></tfoot></table></div></section>
+      ${items.map((i,k)=>{ const p=S.products.get(i.productId); const ok=p&&p.stock>=i.qty; const take=bundleTakeOf(i); return `<tr><td class="muted num">${k+1}</td><td><div class="prod-cell">${thumb(p,1)}<span>${esc(i.name)}${take?` <small>(${take} at ${P(bundlePriceOf(i))})</small>`:""}</span></div></td><td class="r num"><b>${i.qty}</b></td><td class="r num">${p?(ok?p.stock:`<span class="pill bad">${p.stock}</span>`):"—"}</td><td class="r num">${P(lineTotal(i))}</td></tr>`; }).join("")}</tbody>
+      <tfoot><tr><td colspan="4" class="r">Total at SRP</td><td class="r num">${P(o.subtotal)}</td></tr>${bundleDiscountOf(o)?`<tr><td colspan="4" class="r">Bundle promo</td><td class="r num">−${P(bundleDiscountOf(o))}</td></tr>`:""}<tr><td colspan="4" class="r">${discLabel(o)}</td><td class="r num">−${P(o.pctDiscount)}</td></tr><tr><td colspan="4" class="r">Estimated total</td><td class="r num">${P(o.amount)}</td></tr></tfoot></table></div></section>
     ${S.canWrite?`<div class="actions" style="margin-bottom:16px">
       ${o.status==="new"?`<button class="btn primary" data-ost="preparing" type="button">Start preparing</button>`:""}
       ${o.status==="preparing"?`<button class="btn primary" data-ost="ready" type="button">Mark ready for pickup</button>`:""}
@@ -1009,11 +1013,11 @@ function catalogSheet(){
         if(srp!=null&&(!p||Number(p.srp)!==srp)){ d.priceHistory=[...(d.priceHistory||[]),{at:now,by:S.me,catalog:name,from:p?p.srp??null:null,to:srp}].slice(-36); d.srp=srp; }
         if(setDp&&srp) d.dealerPrice=r2(srp*(1-pct/100)); else if(!d.dealerPrice) d.dealerPrice=srp?r2(srp*(1-pct/100)):0;
         if(it.pct!=null) d.discountPct=it.pct;
-        if(it.promo) d.promo={price:it.promo,from:it.from||from,to:it.to||to,label:name,noDiscount:!!(p&&p.promo&&p.promo.noDiscount)};
-        else if(clr&&d.promo) d.promo=null;
+        if(it.promo) d.promo={price:it.promo,from:it.from||from,to:it.to||to,label:name,noDiscount:!!(p&&p.promo&&p.promo.noDiscount),bundle:p&&p.promo&&p.promo.bundle?p.promo.bundle:null};
+        else if(clr&&d.promo) d.promo=d.promo.bundle?{...d.promo,price:null}:null;
         d.updated=stamp(); jobs.push([id,d]);
       }
-      for(const [id,p] of plan.missing){ if(arch) jobs.push([id,{...p,active:false,updated:stamp()}]); else if(clr&&p.promo) jobs.push([id,{...p,promo:null,updated:stamp()}]); }
+      for(const [id,p] of plan.missing){ if(arch) jobs.push([id,{...p,active:false,updated:stamp()}]); else if(clr&&p.promo) jobs.push([id,{...p,promo:p.promo.bundle?{...p.promo,price:null}:null,updated:stamp()}]); }
       await reviewImport("catalog",{records:jobs.map(([id,data])=>({id,data})),settings:S.canAdmin?{...S.settings,catalogName:name,catalogAt:now}:undefined});
 
     });
@@ -1023,7 +1027,11 @@ function catalogSheet(){
   }]);
 }
 
-const lineDisc=(i,t)=>i.qty*i.price*(i.pct!=null?i.pct:(t&&t.discountPct)||0)/100;
+const bundleTakeOf=i=>i?Number(i.takeQty ?? i.freeQty ?? 0):0;
+const bundlePriceOf=i=>i?Number(i.takePrice ?? 0):0;
+const bundleDiscountOf=o=>r2(o?(o.bundleDiscount ?? o.freeDiscount ?? 0):0);
+const lineTotal=i=>r2((Number(i.qty)-bundleTakeOf(i))*Number(i.price)+bundleTakeOf(i)*bundlePriceOf(i));
+const lineDisc=(i,t)=>{ const take=bundleTakeOf(i); return take*(Number(i.price)-bundlePriceOf(i))+Math.max(0,Number(i.qty)-take)*Number(i.price)*(i.pct!=null?i.pct:(t&&t.discountPct)||0)/100; };
 const discLabel=t=>t.discountPct!=null?`Less ${t.discountPct}% dealer discount`:"Less dealer discount";
 /* ================= sheet stack ================= */
 const stack=[];
@@ -1192,10 +1200,15 @@ async function productForm(id){
     <label class="f">Usual supplier<input id="p-supplier" maxlength="160" value="${esc(p.supplier||"")}" ${S.canAdmin?"":"disabled"}></label>
     <label class="f">Reorder when at or below<input id="p-re" type="number" min="0" step="1" value="${esc(p.reorderLevel??"")}"></label>
     <label class="f">Dealer discount for this product (%)<input id="p-pct" type="number" min="0" max="100" step="0.01" value="${esc(p.discountPct??"")}" placeholder="Same as dealer's (${storePct()}%)" ${S.canAdmin?"":"disabled"}><span class="hint">Leave blank unless this item gets a different discount, e.g. 0 for net-priced items.</span></label>
-    <div class="span promo-box"><h3 style="font-size:14px;margin:0 0 8px">Promo ${promoOn(p)?`<span class="pill warn">ON NOW</span>`:p.promo&&p.promo.price?`<span class="pill neutral">${p.promo.to&&p.promo.to<today()?"ended":"scheduled"}</span>`:""}</h3><div class="form-grid">
+    <div class="span promo-box"><h3 style="font-size:14px;margin:0 0 8px">Promo ${promoOn(p)?`<span class="pill warn">ON NOW</span>`:p.promo&&(p.promo.price||p.promo.bundle)?`<span class="pill neutral">${p.promo.to&&p.promo.to<today()?"ended":"scheduled"}</span>`:""}</h3><div class="form-grid">
       <label class="f">Promo price (₱)<input id="p-promo" type="number" min="0" step="0.01" value="${esc(p.promo&&p.promo.price||"")}" placeholder="No promo" ${S.canAdmin?"":"disabled"}></label>
       <label class="f">From<input id="p-pfrom" type="date" value="${esc(p.promo&&p.promo.from||"")}" ${S.canAdmin?"":"disabled"}></label>
       <label class="f">Until<input id="p-pto" type="date" value="${esc(p.promo&&p.promo.to||"")}" ${S.canAdmin?"":"disabled"}></label>
+      <label class="f">Buy this many<input id="p-buy" type="number" min="1" max="1000" step="1" value="${esc(p.promo&&p.promo.bundle&&p.promo.bundle.buy||"")}" placeholder="e.g. 2" ${S.canAdmin?"":"disabled"}></label>
+      <label class="f">Take this many at the take price<input id="p-take" type="number" min="1" max="1000" step="1" value="${esc(p.promo&&p.promo.bundle?(p.promo.bundle.take??p.promo.bundle.free??""):"")}" placeholder="e.g. 1" ${S.canAdmin?"":"disabled"}></label>
+      <label class="f">Take price (₱)<input id="p-takep" type="number" min="0" step="0.01" value="${esc(p.promo&&p.promo.bundle&&p.promo.bundle.takePrice!=null?p.promo.bundle.takePrice:"")}" placeholder="0 = free" ${S.canAdmin?"":"disabled"}></label>
+      <p class="hint span" style="margin:0">Buy 2, take 1 at ₱162 means enter <b>2</b>, <b>1</b> and <b>162</b>. Enter the total units taken on the sale; it repeats for each complete set (6 units = 2 at the take price) and only inside the promo dates. Every unit still comes out of stock.</p>
+      <p class="hint span" id="p-earn" style="margin:0"></p>
       <label class="chk span"><input type="checkbox" id="p-pnod" ${p.promo&&p.promo.noDiscount?"checked":""} ${S.canAdmin?"":"disabled"}> Promo price is final (no dealer discount on top)</label></div></div>
     <div class="actions span"><button class="btn primary" type="submit">${id?"Save changes":"Add product"}</button><button class="btn" type="button" data-back>Cancel</button>
     ${id?`<button class="btn" type="button" data-act="stock-for" data-id="${id}">Stock in / adjust</button>`:""}
@@ -1205,6 +1218,14 @@ async function productForm(id){
     const srpIn=$("#p-srp",sh), dpIn=$("#p-dp",sh); let dpTouched=!!dpIn.value;
     dpIn.addEventListener("input",()=>{ dpTouched=true; });
     srpIn.addEventListener("input",()=>{ const v=r2(srpIn.value*(1-storePct()/100)); $("#p-dph",sh).textContent=srpIn.value?`SRP less ${storePct()}% = ${P(v)}`:"Your cost to the dealer after discount."; if(!dpTouched&&srpIn.value) dpIn.value=v.toFixed(2); });
+    const earn=$("#p-earn",sh);
+    const updateEarn=()=>{ if(!earn) return; const pp=Number($("#p-promo",sh).value)||0, dp=Number($("#p-dp",sh).value)||0, srp=Number($("#p-srp",sh).value)||0;
+      const buy=Math.round(Number($("#p-buy",sh).value)||0), take=Math.round(Number($("#p-take",sh).value)||0), tp=Number($("#p-takep",sh).value)||0;
+      const unit=pp>0?pp:dp;
+      if(!(buy>0&&take>0&&srp>0&&unit>0)){ earn.textContent=""; return; }
+      const w=r2((buy+take)*srp-(buy*unit+take*tp));
+      earn.innerHTML=`Dealer ${w<0?"loses":"earns"} about <b>${P(Math.abs(w))}</b> per set of ${buy+take} at SRP ${P(srp)} (cost ${buy} × ${P(unit)}${take?` + ${take} × ${P(tp)}`:""}).`; };
+    ["p-buy","p-take","p-takep","p-promo","p-srp","p-dp"].forEach(id=>{ const el=$("#"+id,sh); if(el) el.addEventListener("input",updateEarn); }); updateEarn();
     let newFile=null, removeImg=false; const fileIn=$("#p-file",sh);
     const setFile=f=>{ if(!f) return; if(!f.type.startsWith("image/")){ toast("Choose an image file"); if(fileIn) fileIn.value=""; return; } newFile=f; removeImg=false; $("#p-prev",sh).innerHTML=`<img class="big" src="${URL.createObjectURL(f)}" alt="New product photo">`; };
     if(fileIn){ fileIn.addEventListener("change",()=>setFile(fileIn.files[0]));
@@ -1219,7 +1240,9 @@ async function productForm(id){
       const data={...base,name,category:$("#p-cat").value.trim(),code:$("#p-code").value.trim(),dealerPrice:r2($("#p-dp").value),srp:$("#p-srp").value?r2($("#p-srp").value):null,reorderLevel:re===""?null:Math.max(0,Number(re)),imageLink:/^https?:\/\//i.test(link)?link:null,updated:stamp()};
       data.purchaseCost=$("#p-cost").value===""?null:r2($("#p-cost").value);data.supplier=$("#p-supplier").value.trim();data.establishCost=!!$("#p-establish")?.checked;
       data.discountPct=$("#p-pct").value===""?null:Math.min(100,Math.max(0,Number($("#p-pct").value)));
-      { const pp=r2($("#p-promo").value); data.promo=pp>0?{...(base.promo||{}),price:pp,from:$("#p-pfrom").value||null,to:$("#p-pto").value||null,noDiscount:$("#p-pnod").checked}:null; }
+      { const pp=r2($("#p-promo").value); const buy=Math.round(Number($("#p-buy").value)||0), take=Math.round(Number($("#p-take").value)||0);
+        const bundle=buy>0&&take>0?{buy,take,takePrice:r2($("#p-takep").value)}:null;
+        data.promo=pp>0||bundle?{...(base.promo||{}),price:pp>0?pp:null,bundle,from:$("#p-pfrom").value||null,to:$("#p-pto").value||null,noDiscount:$("#p-pnod").checked}:null; }
       if(id&&Number(base.srp||0)!==Number(data.srp||0)) data.priceHistory=[...(base.priceHistory||[]),{at:Date.now(),by:S.me,catalog:"Edited",from:base.srp??null,to:data.srp}].slice(-36);
       guarded(btn,async()=>{
         if(newFile){ btn.textContent="Uploading photo…"; try{ const up=await assets.upload(await shrinkImage(newFile)); data.imageId=up.id; }catch(err){ const m={too_large:"That photo is too large. Try a smaller one.",unsupported_type:"That file type isn't supported. Use JPG or PNG."}[err&&err.code]||"Couldn't upload the photo. Try again."; throw Object.assign(new Error(m),{userMsg:m}); } }
@@ -1265,9 +1288,13 @@ function stockForm(pid){
 const storePct=()=>{ const v=Number(S.settings.discountPct??25); return Number.isFinite(v)?v:25; };
 const dealerPct=d=>d&&d.discountPct!=null&&d.discountPct!==""?Number(d.discountPct):storePct();
 const promoOn=(p,date)=>!!(p&&p.promo&&Number(p.promo.price)>0&&(!p.promo.from||(date||today())>=p.promo.from)&&(!p.promo.to||(date||today())<=p.promo.to));
+const bundleOf=p=>{ const b=p&&p.promo&&p.promo.bundle; if(!b) return null; const buy=Number(b.buy),take=Number(b.take!=null?b.take:b.free),takePrice=b.takePrice==null||b.takePrice===""?0:Number(b.takePrice); return Number.isInteger(buy)&&Number.isInteger(take)&&buy>0&&take>0&&Number.isFinite(takePrice)&&takePrice>=0?{buy,take,takePrice}:null; };
+const bundleOn=(p,date)=>!!bundleOf(p)&&(!p.promo.from||(date||today())>=p.promo.from)&&(!p.promo.to||(date||today())<=p.promo.to);
+const bundleTakeQty=(qty,p,date)=>{ const b=bundleOf(p); if(!b||!bundleOn(p,date)) return 0; const n=Math.max(0,Math.floor(Number(qty)||0)); return Math.min(n,Math.floor(n/(b.buy+b.take))*b.take); };
+const bundleLabel=p=>{ const b=bundleOf(p); return b?`Buy ${b.buy}, take ${b.take}${b.takePrice>0?` at ${P(b.takePrice)}`:" free"}`:""; };
 const listPrice=(p,pct,date)=>promoOn(p,date)?Number(p.promo.price):(pct>0?(Number(p.srp)||Number(p.dealerPrice)||0):(Number(p.dealerPrice)||Number(p.srp)||0));
 const linePct=(p,dpct,date)=>promoOn(p,date)&&p.promo.noDiscount?0:(p&&p.discountPct!=null&&p.discountPct!==""?Number(p.discountPct):dpct);
-const priceTag=(p,pct,date)=>promoOn(p,date)?`<s class="muted small">${P(p.srp)}</s> <b>${P(p.promo.price)}</b> <span class="pill warn">PROMO</span>`:P(listPrice(p,pct,date));
+const priceTag=(p,pct,date)=>`${promoOn(p,date)?`<s class="muted small">${P(p.srp)}</s> <b>${P(p.promo.price)}</b> <span class="pill warn">PROMO</span>`:P(listPrice(p,pct,date))}${bundleOn(p,date)?` <span class="pill sample">${esc(bundleLabel(p))}</span>`:""}`;
 function itemsForm(kind,dealerId,editId,opts){
   if(!activeDealers().length&&!editId){ toast("Add a dealer first"); dealerForm(); return; }
   if(!activeProducts().length&&!editId){ toast("Add a product first"); productForm(); return; }
@@ -1300,16 +1327,17 @@ function itemsForm(kind,dealerId,editId,opts){
     ${old?correctionField():""}
     ${isSale&&!old?`<label class="f" style="margin-top:10px">Credit approval reason<input id="s-approval-reason" placeholder="Why this release should be approved"></label><label class="f">Owner override reason<input id="s-override-reason" placeholder="Required when releasing over a credit hold"></label><button class="btn" id="s-request" type="submit" hidden>Request owner approval</button>`:""}
     <div class="actions" style="margin-top:12px"><button class="btn primary" type="submit">${editId?"Save changes":isSale?"Record sale":"Record return"}</button><button class="btn" type="button" data-back>Cancel</button></div></form>`,sh=>{
-    const cart=old?(old.items||[]).map(i=>({...i,pct:i.pct!=null?i.pct:(old.discountPct??0),mp:true,pf:true})):opts&&opts.items?opts.items.map(i=>({...i,pct:i.pct!=null?i.pct:(opts.pct??0),mp:true,pf:true})):[];
+    const cart=old?(old.items||[]).map(i=>({...i,takeQty:isSale?Number(i.takeQty ?? i.freeQty)||0:0,takePrice:isSale?Number(i.takePrice)||0:0,pct:i.pct!=null?i.pct:(old.discountPct??0),mp:true,pf:true})):opts&&opts.items?opts.items.map(i=>({...i,takeQty:isSale?Number(i.takeQty ?? i.freeQty)||0:0,takePrice:isSale?Number(i.takePrice)||0:0,pct:i.pct!=null?i.pct:(opts.pct??0),mp:true,pf:true})):[];
     const sDate=()=>$("#s-date").value||today();
-    const refreshLines=()=>cart.forEach(i=>{ const p=S.products.get(i.productId); if(!p) return; if(!i.mp){ i.price=listPrice(p,pct(),sDate()); i.promo=promoOn(p,sDate()); } if(!i.pf) i.pct=linePct(p,pct(),sDate()); });
+    const syncTake=(i,force=false)=>{ const p=S.products.get(i.productId); if(!isSale){ i.takeQty=0; i.takePrice=0; return; } const b=p?bundleOf(p):null; if(force||i.takeQty===undefined){ i.takeQty=p?bundleTakeQty(i.qty,p,sDate()):0; i.takePrice=b?Math.min(b.takePrice,i.price):0; } };
+    const refreshLines=()=>cart.forEach(i=>{ const p=S.products.get(i.productId); if(!p) return; if(!i.mp){ i.price=listPrice(p,pct(),sDate()); i.promo=promoOn(p,sDate()); } if(!i.pf) i.pct=linePct(p,pct(),sDate()); syncTake(i); });
     let pctTouched=!!old||!!(opts&&opts.pct!=null);
     const prods=()=>{ const l=activeProducts(); cart.forEach(i=>{ if(!l.find(([id])=>id===i.productId)&&S.products.get(i.productId)) l.push([i.productId,S.products.get(i.productId)]); }); return l; };
     const pct=()=>Math.min(100,Math.max(0,Number($("#s-pct").value)||0));
     const uniPct=()=>{ const ps=new Set(cart.map(i=>i.pct)); return ps.size<=1?(cart.length?cart[0].pct:pct()):null; };
-    const totals=()=>{ const sub=r2(cart.reduce((a,i)=>a+i.qty*i.price,0)); const pd=r2(cart.reduce((a,i)=>a+i.qty*i.price*(i.pct||0)/100,0)); const extra=isSale?Math.min(r2(sub-pd),Math.max(0,r2($("#s-disc").value))):0; return {sub,pd,extra,total:r2(sub-pd-extra)}; };
+    const totals=()=>{ const sub=r2(cart.reduce((a,i)=>a+i.qty*i.price,0)); const bundle=r2(cart.reduce((a,i)=>a+(i.takeQty||0)*(i.price-(i.takePrice||0)),0)); const pd=r2(cart.reduce((a,i)=>a+Math.max(0,i.qty-(i.takeQty||0))*i.price*(i.pct||0)/100,0)); const extra=isSale?Math.min(r2(sub-bundle-pd),Math.max(0,r2($("#s-disc").value))):0; return {sub,bundle,pd,extra,total:r2(sub-bundle-pd-extra)}; };
     const addProduct=(pid,qty=1)=>{ const p=S.products.get(pid); if(!p) return; const ex=cart.find(i=>i.productId===pid);
-      if(ex) ex.qty+=qty; else { cart.push({productId:pid,name:p.name,qty,price:0,pct:0}); refreshLines(); } drawCart(); drawPick(); };
+      if(ex) ex.qty+=qty; else { cart.push({productId:pid,name:p.name,qty,price:0,pct:0}); refreshLines(); } syncTake(cart.find(i=>i.productId===pid),true); drawCart(); drawPick(); };
     const drawPick=()=>{ const q=$("#pick-q").value.trim().toLowerCase();
       const list=prods().filter(([,p])=>!q||[p.name,p.code,p.category].join(" ").toLowerCase().includes(q)).slice(0,60);
       $("#pick-list").innerHTML=list.length?`<table><thead><tr><th></th><th>Product</th><th>Code</th><th class="r">Available</th><th class="r">SRP</th><th></th></tr></thead><tbody>${list.map(([id,p])=>{ const inCart=cart.find(i=>i.productId===id);
@@ -1320,25 +1348,28 @@ function itemsForm(kind,dealerId,editId,opts){
       $("#cart-head").innerHTML=nar?`<tr><th>Product</th><th class="r">Qty</th><th class="r">Amount</th></tr>`:`<tr><th>#</th><th>Product</th><th class="r">Qty</th><th class="r">SRP each</th><th class="r">Amount</th><th><span style="position:absolute;left:-9999px">Remove</span></th></tr>`;
       $("#cart").innerHTML=cart.length?cart.map((i,k)=>{ const p=S.products.get(i.productId);
         return `<tr class="cart-row" data-k="${k}">${nar?"":`<td class="c-no num">${k+1}</td>`}
-          <td><div class="prod-cell">${nar?"":thumb(p,1)}<div><b>${esc(i.name)}</b>${i.promo?` <span class="pill warn">PROMO</span>`:""}${i.pct!==pct()?`<div class="small muted">dealer discount ${i.pct}%</div>`:""}${nar?`<div class="small muted num c-each">${P(i.price)} each</div>`:""}${p&&!p.srp&&pct()>0?`<div class="small" style="color:var(--warn)">No SRP saved. Using dealer price.</div>`:""}</div></div></td>
+          <td><div class="prod-cell">${nar?"":thumb(p,1)}<div><b>${esc(i.name)}</b>${i.promo?` <span class="pill warn">PROMO</span>`:""}${i.takeQty?` <span class="pill sample">${i.takeQty}${Number(i.takePrice)>0?` @ ${P(i.takePrice)}`:" free"}</span>`:""}${i.pct!==pct()?`<div class="small muted">dealer discount ${i.pct}%</div>`:""}${nar?`<div class="small muted num c-each">${P(i.price)} each</div>`:""}${p&&!p.srp&&pct()>0?`<div class="small" style="color:var(--warn)">No SRP saved. Using dealer price.</div>`:""}</div></div></td>
           <td class="r"><div class="stepper"><button type="button" class="btn sm" data-dec aria-label="${i.qty>1?"One less":"Remove"} ${esc(i.name)}" title="${i.qty>1?"One less":"Remove item"}">${i.qty>1?"−":"✕"}</button><input class="num c-qty" id="cq-${k}" type="number" min="1" step="1" inputmode="numeric" value="${i.qty}" aria-label="Quantity of ${esc(i.name)}"><button type="button" class="btn sm" data-inc aria-label="One more ${esc(i.name)}">+</button></div></td>
           ${nar?"":`<td class="r"><input class="num c-price" id="cp-${k}" type="number" min="0" step="0.01" value="${i.price}" aria-label="Price each for ${esc(i.name)}"></td>`}
-          <td class="r num cart-amt nowrap"><b>${P(i.qty*i.price)}</b></td>
+          <td class="r num cart-amt nowrap"><b>${P(lineTotal(i))}</b></td>
           ${nar?"":`<td class="r"><button type="button" class="btn sm" data-rm aria-label="Remove ${esc(i.name)}" title="Remove">✕</button></td>`}</tr>`; }).join(""):`<tr><td colspan="${cols}"><div class="empty" style="padding:14px"><p style="margin:0">No items yet. Tap products above to add them.</p></div></td></tr>`;
       const tail=nar?"":"<td></td>";
       $("#cart-foot").innerHTML=`<tr><td colspan="${lab}" class="r muted" id="s-subl">Total at SRP</td><td class="r num nowrap" id="s-sub"></td>${tail}</tr>
+        ${isSale?`<tr id="s-bundlerow"><td colspan="${lab}" class="r muted" id="s-bundlel">Bundle promo</td><td class="r num nowrap" id="s-bundle"></td>${tail}</tr>`:""}
         <tr><td colspan="${lab}" class="r muted" id="s-pdl">Less dealer discount</td><td class="r num nowrap" id="s-pd"></td>${tail}</tr>
         ${isSale?`<tr><td colspan="${lab}" class="r muted">Extra discount</td><td class="r num nowrap" id="s-dsc"></td>${tail}</tr>`:""}
         <tr class="grand"><td colspan="${lab}" class="r">${isSale?"Total on credit":"Total credited to dealer"}</td><td class="r num nowrap" id="s-total"></td>${tail}</tr>`;
       calc(); };
     narrowMQ.addEventListener?.("change",()=>{ if(sh.isConnected) drawCart(); });
     const calc=()=>{
-      const T=totals(), units=cart.reduce((a,i)=>a+i.qty,0);
-      $("#cart-count").textContent=cart.length?`${cart.length} product${cart.length===1?"":"s"} · ${units} pc${units===1?"":"s"}`:"Tap a product to add it. Tap again to add one more.";
+      const T=totals(), units=cart.reduce((a,i)=>a+i.qty,0), takeTotal=cart.reduce((a,i)=>a+(i.takeQty||0),0);
+      $("#cart-count").textContent=cart.length?`${cart.length} product${cart.length===1?"":"s"} · ${units} pc${units===1?"":"s"}${takeTotal?` · ${takeTotal} at bundle price`:""}`:"Tap a product to add it. Tap again to add one more.";
       $("#s-subl").textContent=pct()>0?"Total at SRP":"Subtotal";
-      $("#s-sub").textContent=P(T.sub); { const u=uniPct(); $("#s-pdl").textContent=u!=null?`Less ${u}% dealer discount`:"Less dealer discount (varies per item)"; } $("#s-pd").textContent="−"+P(T.pd); if(isSale) $("#s-dsc").textContent="−"+P(T.extra);
+      $("#s-sub").textContent=P(T.sub); { const u=uniPct(); $("#s-pdl").textContent=u!=null?`Less ${u}% dealer discount`:"Less dealer discount (varies per item)"; } $("#s-pd").textContent="−"+P(T.pd);
+      const br=$("#s-bundlerow",sh); if(br){ br.hidden=!(T.bundle>0); $("#s-bundle").textContent="−"+P(T.bundle); }
+      if(isSale) $("#s-dsc").textContent="−"+P(T.extra);
       $("#s-total").textContent=P(T.total);
-      $$(".cart-row",sh).forEach(r=>{ const i=cart[r.dataset.k]; if(i) $(".cart-amt",r).innerHTML=`<b>${P(i.qty*i.price)}</b>`; });
+      $$(".cart-row",sh).forEach(r=>{ const i=cart[r.dataset.k]; if(i) $(".cart-amt",r).innerHTML=`<b>${P(lineTotal(i))}</b>`; });
       const w=[], hard=[]; const did=$("#s-dealer").value, d=S.dealers.get(did);
       if(isSale&&d){ const st=status(did); const prior=old&&old.dealerId===did&&!old.voided?old.amount:0; const nb=st.balance-prior+T.total;
         if(st.maxLate>holdDays()) hard.push(`${esc(d.name)} is on hold: ${P(st.overdue)} overdue, oldest delivery ${st.maxLate} days late. Collect a payment first.`);
@@ -1356,16 +1387,16 @@ function itemsForm(kind,dealerId,editId,opts){
     $("#pick-q").addEventListener("input",drawPick);
     $("#pick-q").addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); const b=$("#pick-list [data-pid]"); if(b){ addProduct(b.dataset.pid); $("#pick-q").value=""; drawPick(); } } });
     $("#cart").addEventListener("click",e=>{ const row=e.target.closest(".cart-row"); if(!row) return; const i=cart[row.dataset.k];
-      if(e.target.closest("[data-inc]")){ i.qty++; drawCart(); drawPick(); }
-      else if(e.target.closest("[data-dec]")){ if(i.qty>1) i.qty--; else cart.splice(row.dataset.k,1); drawCart(); drawPick(); }
+      if(e.target.closest("[data-inc]")){ i.qty++; syncTake(i,true); drawCart(); drawPick(); }
+      else if(e.target.closest("[data-dec]")){ if(i.qty>1) i.qty--; else cart.splice(row.dataset.k,1); syncTake(i,true); drawCart(); drawPick(); }
       else if(e.target.closest("[data-rm]")){ cart.splice(row.dataset.k,1); drawCart(); drawPick(); } });
     $("#cart").addEventListener("input",e=>{ const row=e.target.closest(".cart-row"); if(!row) return; const i=cart[row.dataset.k];
-      if(e.target.classList.contains("c-qty")) i.qty=Math.max(1,Math.round(Number(e.target.value)||1));
-      if(e.target.classList.contains("c-price")){ i.price=Math.max(0,r2(e.target.value)); i.mp=true; const ce=$(".c-each",row); if(ce) ce.textContent=P(i.price)+" each"; } calc(); });
+      if(e.target.classList.contains("c-qty")){ i.qty=Math.max(1,Math.round(Number(e.target.value)||1)); syncTake(i,true); }
+      if(e.target.classList.contains("c-price")){ i.price=Math.max(0,r2(e.target.value)); i.mp=true; if((i.takePrice||0)>i.price) i.takePrice=i.price; const ce=$(".c-each",row); if(ce) ce.textContent=P(i.price)+" each"; } calc(); });
     $("#cart").addEventListener("change",e=>{ if(e.target.classList.contains("c-qty")) drawCart(); });
     $("#s-pct").addEventListener("input",()=>{ pctTouched=true; cart.forEach(i=>i.pf=false); refreshLines(); drawCart(); drawPick(); });
     $("#s-dealer").addEventListener("change",()=>{ setDue(); if(!pctTouched){ $("#s-pct").value=dealerPct(S.dealers.get($("#s-dealer").value)); cart.forEach(i=>i.pf=false); refreshLines(); drawCart(); drawPick(); } else calc(); });
-    $("#s-date").addEventListener("change",()=>{ setDue(); refreshLines(); drawCart(); drawPick(); });
+    $("#s-date").addEventListener("change",()=>{ setDue(); cart.forEach(i=>syncTake(i,true)); refreshLines(); drawCart(); drawPick(); });
     if(isSale) $("#s-disc").addEventListener("input",calc);
     const paid=$("#s-paid",sh); if(paid) paid.addEventListener("change",()=>{ $("#s-method").hidden=!paid.checked; });
     if(!isSale){const original=$("#s-original",sh);const choices=()=>{const keep=original.value||old?.originalSaleId;original.innerHTML=`<option value="">Choose the original sale…</option>`+[...S.txns].filter(([,t])=>t.type==="sale"&&!t.voided&&!t.opening&&t.dealerId===$("#s-dealer",sh).value).map(([id,t])=>`<option value="${esc(id)}" ${id===keep?"selected":""}>${esc(t.no)} · ${fmtDate(t.date)}</option>`).join("");};$("#s-dealer",sh).addEventListener("change",choices);choices();}
@@ -1377,7 +1408,7 @@ function itemsForm(kind,dealerId,editId,opts){
       if(isSale&&$("#s-due").value<$("#s-date").value){ toast("The due date can't be before the release date"); return; }
       const approved=S._hard&&S.acct?.role==="owner"&&$("#s-ovr")&&$("#s-ovr").checked;
       if(isSale&&!old&&S._hard&&!approved&&e.submitter?.id!=="s-request"){ toast(S.canAdmin?"This dealer is on credit hold. Tick “Release anyway” to approve.":"This dealer is on credit hold. Ask the owner to approve."); return; }
-      const data={...(old||{}),type:kind,dealerId:did,date:$("#s-date").value,items:cart.map(i=>({productId:i.productId,name:i.name,qty:i.qty,price:i.price,pct:i.pct,...(i.promo?{promo:true}:{})})),subtotal:T.sub,discountPct:uniPct(),pctDiscount:T.pd,amount:T.total,note:$("#s-note").value.trim()};
+      const data={...(old||{}),type:kind,dealerId:did,date:$("#s-date").value,items:cart.map(i=>({productId:i.productId,name:i.name,qty:i.qty,takeQty:isSale?Number(i.takeQty||0):0,takePrice:isSale?Number(i.takePrice||0):0,price:i.price,pct:i.pct,...(i.promo?{promo:true}:{})})),subtotal:T.sub,bundleDiscount:T.bundle,discountPct:uniPct(),pctDiscount:T.pd,amount:T.total,note:$("#s-note").value.trim()};
       if(isSale){ data.dueDate=$("#s-due").value; data.discount=T.extra; } else {data.restock=$("#s-restock").checked;data.originalSaleId=$("#s-original").value||null;}
       if(!old){ data.no=nextNo(kind); data.createdAt=Date.now(); data.createdBy=S.me; if(approved) data.override={reason:$("#s-override-reason",sh).value.trim()}; } else data.updated=stamp();
       if(opts?.orderId) data.orderId=opts.orderId;
@@ -1441,7 +1472,7 @@ function txSheet(id){
       ${t.type==="sale"?`<dt>Due</dt><dd>${fmtDate(t.dueDate)}</dd>`:""}
       ${["payment","refund"].includes(t.type)?`<dt>Method</dt><dd>${esc(t.method)}</dd><dt>Reference</dt><dd>${esc(t.ref||"—")}</dd>`:""}
       ${t.type==="return"?`<dt>Stock</dt><dd>${t.restock?"Items put back in stock":"Not restocked"}</dd>`:""}
-      <dt>Amount</dt><dd class="num"><b>${P(t.amount)}</b>${(t.discount||0)+(t.pctDiscount||0)?` <span class="muted">(after ${P((t.discount||0)+(t.pctDiscount||0))} discount)</span>`:""}</dd>
+      <dt>Amount</dt><dd class="num"><b>${P(t.amount)}</b>${(t.discount||0)+(t.pctDiscount||0)+bundleDiscountOf(t)?` <span class="muted">(after ${P((t.discount||0)+(t.pctDiscount||0)+bundleDiscountOf(t))} discount)</span>`:""}</dd>
       ${t.note?`<dt>Note</dt><dd>${esc(t.note)}</dd>`:""}
       <dt>Recorded</dt><dd>${t.createdAt>1e9?fmtStamp(t.createdAt)+" by "+esc(nameOf(t.createdBy)):"—"}</dd>
       ${t.override?`<dt>Credit hold</dt><dd>Released anyway, approved by ${esc(nameOf(t.override.by))}</dd>`:""}
@@ -1451,8 +1482,8 @@ function txSheet(id){
     ${S.canAdmin?`<button class="btn sm" data-act="transaction-history" data-id="${esc(id)}" type="button">Correction history</button>`:""}
     ${t.type==="payment"?allocationTable(t.applied||[],t.unapplied):""}
     ${items.length?`<section class="panel" style="margin-bottom:16px"><div class="tbl-wrap"><table><thead><tr><th>#</th><th>Item</th><th class="r">Qty</th><th class="r">Price each</th><th class="r">Amount</th></tr></thead><tbody>
-      ${items.map((i,k)=>`<tr><td class="muted num">${k+1}</td><td><div class="prod-cell">${thumb(S.products.get(i.productId),1)}<span>${esc(i.name)}</span></div></td><td class="r num">${i.qty}</td><td class="r num">${P(i.price)}</td><td class="r num">${P(i.qty*i.price)}</td></tr>`).join("")}</tbody>
-      <tfoot>${t.pctDiscount||t.discount?`<tr><td colspan="4" class="r">${t.pctDiscount?"Total at SRP":"Subtotal"}</td><td class="r num">${P(t.subtotal??items.reduce((a,i)=>a+i.qty*i.price,0))}</td></tr>`:""}${t.pctDiscount?`<tr><td colspan="4" class="r">${discLabel(t)}</td><td class="r num">−${P(t.pctDiscount)}</td></tr>`:""}${t.discount?`<tr><td colspan="4" class="r">Extra discount</td><td class="r num">−${P(t.discount)}</td></tr>`:""}<tr><td colspan="4" class="r">Total</td><td class="r num">${P(t.amount)}</td></tr></tfoot></table></div></section>`:""}
+      ${items.map((i,k)=>{ const take=bundleTakeOf(i); return `<tr><td class="muted num">${k+1}</td><td><div class="prod-cell">${thumb(S.products.get(i.productId),1)}<span>${esc(i.name)}${take?` <small>(${take} at ${P(bundlePriceOf(i))})</small>`:""}</span></div></td><td class="r num">${i.qty}</td><td class="r num">${P(i.price)}</td><td class="r num">${P(lineTotal(i))}</td></tr>`; }).join("")}</tbody>
+      <tfoot>${t.pctDiscount||t.discount||bundleDiscountOf(t)?`<tr><td colspan="4" class="r">${t.pctDiscount||bundleDiscountOf(t)?"Total at SRP":"Subtotal"}</td><td class="r num">${P(t.subtotal??items.reduce((a,i)=>a+i.qty*i.price,0))}</td></tr>`:""}${bundleDiscountOf(t)?`<tr><td colspan="4" class="r">Bundle promo</td><td class="r num">−${P(bundleDiscountOf(t))}</td></tr>`:""}${t.pctDiscount?`<tr><td colspan="4" class="r">${discLabel(t)}</td><td class="r num">−${P(t.pctDiscount)}</td></tr>`:""}${t.discount?`<tr><td colspan="4" class="r">Extra discount</td><td class="r num">−${P(t.discount)}</td></tr>`:""}<tr><td colspan="4" class="r">Total</td><td class="r num">${P(t.amount)}</td></tr></tfoot></table></div></section>`:""}
     ${t.type==="refund"?`<div class="actions"><button class="btn" data-act="receipt" data-id="${esc(id)}" type="button">Refund receipt</button>${S.canAdmin&&!t.voided?`<button class="btn danger" data-act="void-customer-refund" data-id="${esc(id)}" type="button">Void refund</button>`:""}</div>`:""}
     ${t.type==="sale"&&!t.opening&&!t.voided&&t.items?.length&&S.canWrite?`<button class="btn" data-act="confirm-delivery" data-id="${esc(id)}" type="button">Confirm delivery / signature</button>`:""}
     ${canEditTx(t)?(t.voided?`<div class="actions"><button class="btn" id="t-unvoid" type="button">Restore this ${TYPE_LABEL[t.type].toLowerCase()}</button></div>`:

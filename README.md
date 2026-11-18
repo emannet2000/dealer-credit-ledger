@@ -10,6 +10,7 @@ It runs on Node.js with a built-in SQLite database. There's no separate database
 - **Flexible pricing that follows the monthly catalog:**
   - Discounts at three levels: store default (25%), per dealer, and per product (e.g. 0% for net-priced items).
   - Promo prices with start and end dates, applied automatically to sales and online orders dated inside the promo. You choose whether the dealer discount also applies to the promo price.
+  - Quantity bundles such as "buy 2 at the unit price, take 1 at ₱162" (or take 1 free). Enter the total units taken and the discount is recognized automatically; the bundle repeats for each complete set.
   - **Update catalog:** paste the new price list from Excel, Google Sheets or a CSV. You get a preview of new products, price changes (old → new), promos and products missing from the new list, then apply it all at once. Dealer prices are recalculated and every SRP change is saved in the product's price history.
 - **Full or partial payments:** quick buttons for full balance, overdue only or the oldest delivery, or type any amount. A live preview shows exactly which DRs the payment settles and what's left. Receipts show "Full payment" or "Partial payment" and what the payment was applied to.
 - **Automatic numbers:** DR-00001 for sales, OR-00001 for payments, RT-00001 for returns. They are assigned by the server, so two people can never get the same number.
@@ -62,13 +63,13 @@ cp .env.example .env
 npm start
 ```
 
-Open http://localhost:3330. The first visit asks you to create the **owner** account. After that, add staff from **Store → Team accounts**.
+Open http://localhost:3000. The first visit asks you to create the **owner** account. After that, add staff from **Store → Team accounts**.
 
 ## Settings (`.env`)
 
 | Setting | Default | What it does |
 |---|---|---|
-| `PORT` | `3330` | Web server port |
+| `PORT` | `3000` | Web server port |
 | `DATA_DIR` | `./data` | Where the database, photos and daily backups are stored. **Back up this folder.** |
 | `COOKIE_SECURE` | `false` | Set to `true` when the site uses HTTPS |
 | `TZ` | `Asia/Manila` | Time zone for "today", due dates and staff edit limits |
@@ -135,8 +136,11 @@ npm run reset-password -- <username> <new-password>
 ## Tests
 
 ```bash
+npm run check   # syntax-check every source file
 npm test
 ```
+
+The same checks run in the included GitHub Actions workflow (`.github/workflows/ci.yml`) on Node.js 20 and 22.
 
 The tests cover sign-in, roles and permissions, DR/OR numbering, atomic stock changes, credit holds, photo uploads, the activity log, backups, database upgrades, dealer portal privacy, online-order status rules, promo and per-product discount pricing, monthly period locks, cashier shift variances and duplicate detection.
 

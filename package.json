@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
+    "check": "node scripts/check.js",
     "test": "node --test --test-concurrency=1 test/*.test.js",
     "import": "node scripts/import-backup.js",
     "reset-password": "node scripts/reset-password.js"
