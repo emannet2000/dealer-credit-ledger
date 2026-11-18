@@ -170,6 +170,22 @@ test("dealer portal accounts see only their own records and can't write", async 
   assert.match(String(page.data), /Dealer Portal/);
 });
 
+test("the configured GCash QR is available only to signed-in dealers", async () => {
+  const portal = client();
+  await portal("POST", "/api/login", { username: "maria", password: "DealerPassword123!" });
+  const url = "/api/portal/gcash-qr";
+  assert.equal((await portal("GET", url)).status, 404);
+  const file = path.join(dir, "gcash-merchant-qr.png");
+  fs.writeFileSync(file, Buffer.from("89504e470d0a1a0a", "hex"));
+  try {
+    assert.equal((await anon("GET", url)).status, 401);
+    assert.equal((await owner("GET", url)).status, 404);
+    assert.equal((await portal("GET", url)).status, 200);
+  } finally {
+    fs.unlinkSync(file);
+  }
+});
+
 test("online orders: dealer orders are priced by the server and follow status rules", async () => {
   const portal = client();
   await portal("POST", "/api/login", { username: "maria", password: "DealerPassword123!" });

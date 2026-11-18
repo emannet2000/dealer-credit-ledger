@@ -237,3 +237,9 @@ Credit Sale opens centered on desktop and full-screen on phones. Log out is avai
 - Match one or more ledger collections, customer refunds, expenses, supplier payments or supplier refunds whose signed total equals the statement line. An entry cannot be matched twice. Changed or voided ledger records make a saved match need review. Remove the match before reusing an entry, or ignore an unrelated bank line with a reason. Matching and importing statements do not create cash transactions. Reconciliation can be exported as CSV. Owners and editors manage bank matching and customer refunds; staff may record contacts, delivery confirmations and their own document uploads.
 
 New Dealer, Payment Received and Stock in / adjust now open centered on desktop while remaining full-screen on phones.
+
+### Dealer payments via GCash
+
+Place a PNG of the retailer’s GCash merchant payment QR at `gcash-merchant-qr.png` inside the server’s `DATA_DIR` (default `./data`). For a container deployment, put it in the mounted data directory. Keep the image outside the source repository and confirm with a scan that it displays the intended recipient. Set the store’s contact number in Settings so dealers know where to send their payment reference.
+
+Signed-in dealers with an outstanding balance see **Pay with GCash** in the portal. They scan the QR using GCash and send the retailer the amount and reference number. The retailer checks the incoming transaction and records it under **Payment received**, selecting **GCash** and entering the reference. The existing payment allocation updates the dealer’s balance and history. Remove the image to hide the QR option.

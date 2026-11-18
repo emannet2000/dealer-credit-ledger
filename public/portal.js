@@ -52,6 +52,10 @@ function render(){
     </div></section>`;
   if(hold) html+=`<div class="notice bad"><b>Your account is on hold.</b> Your oldest unpaid delivery is ${c.maxLate} days late. Please pay the overdue amount so the store can release new products to you.</div>`;
   else if(c.overdue) html+=`<div class="notice warn"><b>${P(c.overdue)} is past due.</b> Please pay soon to keep your account in good standing.</div>`;
+  if(s.gcashQrAvailable && c.balance>0) html+=`<section class="card"><h3>Pay with GCash</h3>
+    <p>Scan the store’s QR in GCash, check the recipient name, and enter the amount you want to pay. You can pay part or all of your balance.</p>
+    <details><summary>Show payment QR</summary><img src="/api/portal/gcash-qr" loading="lazy" alt="Store GCash payment QR" style="display:block;width:260px;max-width:100%;height:auto;margin:12px 0">
+    <p>Keep your GCash reference number and send it with the amount paid to ${esc(s.storeName||"the store")}${s.phone?" at "+esc(s.phone):""}. Your balance updates after the store verifies and records the payment.</p></details></section>`;
   if(s.paymentInfo) html+=`<section class="card"><div class="pay"><div><h3 style="font-size:16px">How to pay</h3><p>${esc(s.paymentInfo)}</p></div><button class="btn sm" id="copyPay" type="button">Copy</button></div>${s.phone?`<p class="small muted" style="margin:8px 0 0">Questions? Contact ${esc(s.storeName||"the store")}: ${esc(s.phone)}</p>`:""}</section>`;
   const openOrders=S.orders.filter(o=>["new","preparing","ready"].includes(o.status)).length;
   const tabs=[["unpaid",`Unpaid (${c.open.length})`],["catalog","Order"],["orders",`My orders${openOrders?` (${openOrders})`:""}`],["history","History"],["account","Account"]];
